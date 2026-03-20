@@ -57,7 +57,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   }, [src, segments])
 
   function getSegmentIndexForTime(time: number) {
-    return segments.findIndex((segment) => time >= segment.start && time < segment.end)
+    const index = segments.findIndex((segment) => time >= segment.start && time < segment.end)
+    return index >= 0 ? index : null
   }
 
   function startSegment(index: number) {
@@ -102,25 +103,31 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     const video = videoRef.current
     if (!video) return
 
+    if (video.seeking && programmaticSeekTargetRef.current === null) {
+      updatePlaybackMode('free')
+      updateCurrentSegmentIndex(getSegmentIndexForTime(video.currentTime))
+      return
+    }
+
+    if (playbackModeRef.current === 'segments' && currentSegmentIndexRef.current !== null) {
+      const segment = segments[currentSegmentIndexRef.current]
+      if (!segment || video.currentTime < segment.end) return
+
+      const nextIndex = currentSegmentIndexRef.current + 1
+
+      if (nextIndex >= segments.length) {
+        video.pause()
+        return
+      }
+
+      startSegment(nextIndex)
+      return
+    }
+
     const activeSegmentIndex = getSegmentIndexForTime(video.currentTime)
     if (activeSegmentIndex !== currentSegmentIndexRef.current) {
       updateCurrentSegmentIndex(activeSegmentIndex)
     }
-
-    if (playbackModeRef.current !== 'segments' || currentSegmentIndexRef.current === null) return
-
-    const segment = segments[currentSegmentIndexRef.current]
-    if (!segment || video.currentTime < segment.end) return
-
-    const nextIndex = currentSegmentIndexRef.current + 1
-
-    if (nextIndex >= segments.length) {
-      video.pause()
-      video.currentTime = segment.end
-      return
-    }
-
-    startSegment(nextIndex)
   }
 
   return (
