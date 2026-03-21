@@ -2,6 +2,8 @@
 
 Serverless AWS backend for uploading lecture videos directly to S3 and transcribing them with Amazon Transcribe.
 
+![Frontend coverage](.github/badges/frontend-coverage.svg)
+
 ## Architecture
 
 ### Video Upload
@@ -52,6 +54,10 @@ S3 Event (via SNS)
 
 ```
 LectureClip-App/
+├── frontend/
+│   ├── src/                       # React + Vite frontend and Vitest test files
+│   ├── package.json               # Frontend scripts, dependencies, and coverage commands
+│   └── vite.config.ts             # Vite + Vitest coverage configuration
 ├── src/
 │   └── lambdas/
 │       ├── video-upload/
@@ -84,8 +90,11 @@ LectureClip-App/
 │   ├── invoke-local.sh            # Run a Lambda locally with SAM CLI
 │   └── deploy.sh                  # Build and deploy Lambdas to AWS
 ├── .github/
+│   ├── badges/
+│   │   └── frontend-coverage.svg  # Repository-hosted frontend coverage badge
 │   └── workflows/
-│       └── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
+│       ├── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
+│       └── frontend-coverage.yml  # CI — runs Vitest coverage, comments on PRs, updates badge
 ├── pytest.ini                     # Points pytest at tests/
 └── template.yaml                  # SAM template (local dev + CI builds)
 ```
@@ -166,7 +175,32 @@ Supported formats: `mp4`, `mov`, `avi`, `webm`, `mpeg`, `mkv`
 
 Unit tests cover each Lambda handler and an end-to-end flow that mirrors `upload_video.py`. No AWS credentials or network access required — boto3 is mocked with `unittest.mock`.
 
-### Setup
+### Frontend (Vitest)
+
+The frontend uses Vitest with Testing Library and `@vitest/coverage-v8`.
+
+```bash
+cd frontend
+npm install
+
+# Watch mode
+npm test
+
+# Single run
+npm run test:run
+
+# Coverage (text + html + lcov + json-summary)
+npm run test:coverage
+
+# Refresh the repository-hosted coverage badge locally
+npm run coverage:badge
+```
+
+Coverage output lands in `frontend/coverage/`.
+
+`.github/workflows/frontend-coverage.yml` runs automatically for frontend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/frontend-coverage.svg` on pushes to `main`.
+
+### Backend Setup
 
 ```bash
 python -m venv venv
@@ -174,7 +208,7 @@ source venv/bin/activate
 pip install -r tests/requirements.txt
 ```
 
-### Run
+### Backend Run
 
 ```bash
 # All tests
