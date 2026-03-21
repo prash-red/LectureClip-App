@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { VideoPlayer, type VideoPlayerHandle } from '../components/VideoPlayer'
+import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
+import { VideoPlayer } from '../components/VideoPlayer'
+import type { VideoPlayerHandle } from '../components/VideoPlayer'
 import { getTranscript, queryVideo } from '../lib/api'
 import type { Segment, TranscriptSegment, Video } from '../lib/types'
 
