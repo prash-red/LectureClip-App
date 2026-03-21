@@ -4,6 +4,7 @@ import type { Segment } from '../lib/types'
 type VideoPlayerProps = {
   src: string
   segments: Segment[]
+  onPlaybackTimeUpdate?: (seconds: number) => void
 }
 
 export type VideoPlayerHandle = {
@@ -22,7 +23,7 @@ function formatTime(seconds: number) {
 }
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer(
-  { src, segments },
+  { src, segments, onPlaybackTimeUpdate },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -44,6 +45,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     setPlaybackMode(mode)
   }
 
+  function reportPlaybackTime(seconds: number) {
+    onPlaybackTimeUpdate?.(seconds)
+  }
+
   useImperativeHandle(ref, () => ({
     pause() {
       videoRef.current?.pause()
@@ -54,7 +59,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     updateCurrentSegmentIndex(segments.length > 0 ? 0 : null)
     updatePlaybackMode('segments')
     programmaticSeekTargetRef.current = null
-  }, [src, segments])
+    onPlaybackTimeUpdate?.(0)
+  }, [onPlaybackTimeUpdate, src, segments])
 
   function getSegmentIndexForTime(time: number) {
     const index = segments.findIndex((segment) => time >= segment.start && time < segment.end)
@@ -71,11 +77,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     updateCurrentSegmentIndex(index)
     programmaticSeekTargetRef.current = segment.start
     video.currentTime = segment.start
+    reportPlaybackTime(segment.start)
     void video.play()
   }
 
   function handleLoadedMetadata() {
-    if (segments.length === 0) return
+    if (segments.length === 0) {
+      reportPlaybackTime(videoRef.current?.currentTime ?? 0)
+      return
+    }
+
     startSegment(0)
   }
 
@@ -83,6 +94,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     const video = videoRef.current
 
     if (!video) return
+
+    reportPlaybackTime(video.currentTime)
 
     const programmaticSeekTarget = programmaticSeekTargetRef.current
 
@@ -102,6 +115,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   function handleTimeUpdate() {
     const video = videoRef.current
     if (!video) return
+
+    reportPlaybackTime(video.currentTime)
 
     if (video.seeking && programmaticSeekTargetRef.current === null) {
       updatePlaybackMode('free')
