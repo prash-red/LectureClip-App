@@ -1,17 +1,17 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { getTranscript, queryVideo } from '../lib/api.ts'
-import { PlayerPage } from './PlayerPage.tsx'
+import { getTranscript, queryVideo } from '../lib/api'
+import { PlayerPage } from './PlayerPage'
 
 const pauseSpy = vi.fn()
 
-vi.mock('../lib/api.ts', () => ({
+vi.mock('../lib/api', () => ({
   getTranscript: vi.fn(),
   queryVideo: vi.fn(),
 }))
 
-vi.mock('../components/VideoPlayer.tsx', async () => {
+vi.mock('../components/VideoPlayer', async () => {
   const React = await import('react')
 
   return {
