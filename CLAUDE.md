@@ -4,9 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LectureClip is a serverless video processing backend on AWS. It handles video uploads via presigned S3 URLs and automatically transcribes uploaded videos using Amazon Transcribe, orchestrated with AWS Step Functions.
+LectureClip is a full-stack video processing application. The backend is serverless on AWS, handling video uploads via presigned S3 URLs and automatically transcribing uploaded videos using Amazon Transcribe, orchestrated with AWS Step Functions. The frontend is a React SPA that lets users upload videos, query transcripts, and watch relevant segments.
 
 ## Architecture
+
+### Frontend (`frontend/`)
+
+A Vite + React 19 + TypeScript SPA. The user flow is:
+
+1. **UploadPage** — selects a video file and calls `uploadVideo(file)` (currently mocked).
+2. **QueryPage** — submits a natural language query, calls `queryVideo(videoId, query)` which returns `Segment[]` (start/end timestamps).
+3. **PlayerPage** — creates a local blob URL from the `File` object and plays the video client-side. Loads transcript via `getTranscript(videoId)`. Renders `VideoPlayer` with segment navigation and a transcript sidebar.
+
+All API calls live in `frontend/src/lib/api.ts` and are **currently mocked** (no real HTTP requests). The video is never uploaded to S3 from the frontend yet — playback uses a local blob URL.
+
+Key files:
+- `frontend/src/lib/api.ts` — API layer (upload, query, transcript)
+- `frontend/src/lib/types.ts` — `Segment`, `TranscriptSegment`, `Video` types
+- `frontend/src/components/VideoPlayer.tsx` — HTML5 video with segment playback logic
+- `frontend/src/pages/` — `UploadPage`, `QueryPage`, `PlayerPage`
+
+### Backend lambdas (`src/lambdas/`)
 
 ### Upload lambdas (`src/lambdas/`)
 
@@ -43,6 +61,8 @@ S3 key format: `{ISO-timestamp}/{userId}/{filename}`
 
 ## Testing
 
+### Backend
+
 ```bash
 python -m pytest          # run all tests
 python -m pytest -v       # verbose
@@ -50,7 +70,32 @@ python -m pytest -v       # verbose
 
 Tests live in `tests/`. `conftest.py` sets all required environment variables (including `AWS_DEFAULT_REGION` for boto3) and adds `src/lambdas/process-transcribe/` to `sys.path` so its sibling modules are importable. Lambda modules are loaded via `load_lambda("function-dir-name")` which uses `importlib` to handle the hyphenated directory names.
 
+### Frontend
+
+```bash
+cd frontend
+npm run test:run           # single run
+npm test                   # watch mode
+npm run test:coverage      # with coverage report
+npm run test:coverage:ci   # CI mode (verbose reporter)
+```
+
+Tests use **Vitest** + `@testing-library/react` with a jsdom environment. Test files sit alongside source files (`*.test.tsx` / `*.test.ts`). `src/test/setup.ts` stubs browser APIs (`HTMLVideoElement.play/pause`, `URL.createObjectURL/revokeObjectURL`, `scrollIntoView`) that jsdom does not implement.
+
+Coverage is tracked by a GitHub Actions workflow (`.github/workflows/frontend-coverage.yml`) which runs on every push/PR touching `frontend/`, comments coverage on PRs, and updates the badge at `.github/badges/frontend-coverage.svg`.
+
 ## Local Development
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev      # Vite dev server
+npm run build    # TypeScript check + production build
+```
+
+### Backend
 
 Prerequisites: AWS SAM CLI, Docker (for `sam local invoke`), AWS credentials with access to a real S3 bucket (presigned URLs require real credentials).
 
