@@ -1,5 +1,15 @@
 import { defineConfig } from 'vitest/config'
+import type { InlineConfig } from 'vitest/node'
 import react from '@vitejs/plugin-react'
+
+const coverage = {
+  provider: 'istanbul',
+  all: false,
+  reporter: ['text', 'html', 'lcov', 'json-summary'],
+  reportsDirectory: './coverage',
+  include: ['src/**/*.{ts,tsx}'],
+  exclude: ['src/main.tsx', 'src/lib/types.ts', 'src/test/**'],
+} as NonNullable<InlineConfig['coverage']> & { all: boolean }
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -7,12 +17,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
-    coverage: {
-      provider: 'istanbul',
-      reporter: ['text', 'html', 'lcov', 'json-summary'],
-      reportsDirectory: './coverage',
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/main.tsx', 'src/lib/types.ts', 'src/test/**'],
-    },
+    coverage,
   },
 })

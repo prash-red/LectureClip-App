@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:ci": "vitest run --coverage --reporter=verbose",
     "coverage:badge": "node ../scripts/generate-coverage-badge.mjs ./coverage/coverage-summary.json ../.github/badges/frontend-coverage.svg"
   },
   "dependencies": {
