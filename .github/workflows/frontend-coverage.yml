@@ -1,0 +1,164 @@
+name: Frontend Coverage
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-coverage.yml'
+      - 'scripts/generate-coverage-badge.mjs'
+      - 'README.md'
+  push:
+    branches: [main, develop, frontend]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-coverage.yml'
+      - 'scripts/generate-coverage-badge.mjs'
+      - 'README.md'
+
+concurrency:
+  group: frontend-coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-coverage:
+    name: Run frontend tests with coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Print toolchain versions
+        run: |
+          node -v
+          npm -v
+          npm exec -- vite --version
+          npm exec -- vitest --version
+
+      - name: Print frontend dependency versions
+        run: npm ls vite vitest @vitest/coverage-istanbul jsdom @vitejs/plugin-react --depth=0
+
+      - name: Run Vitest coverage
+        run: npm run test:coverage:ci
+
+      - name: Build coverage summary
+        id: coverage-summary
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from 'node:fs'
+
+          const summary = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'))
+          const totals = summary.total
+          const lines = Number(totals.lines.pct).toFixed(2)
+          const statements = Number(totals.statements.pct).toFixed(2)
+          const branches = Number(totals.branches.pct).toFixed(2)
+          const functions = Number(totals.functions.pct).toFixed(2)
+
+          const body = [
+            '## Frontend coverage',
+            '',
+            `- Lines: ${lines}%`,
+            `- Statements: ${statements}%`,
+            `- Branches: ${branches}%`,
+            `- Functions: ${functions}%`,
+          ].join('\n')
+
+          fs.writeFileSync('./coverage/pr-comment.md', body)
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${body}\n`)
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `line_pct=${lines}\n`)
+          EOF
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: frontend/coverage
+          if-no-files-found: error
+
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-summary-${{ github.run_id }}
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: error
+
+      - name: Comment coverage on pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+
+            const marker = '<!-- frontend-coverage-comment -->'
+            const body = `${marker}\n${fs.readFileSync('frontend/coverage/pr-comment.md', 'utf8')}\n\nCoverage artifact: \`frontend/coverage\` from this workflow run.`
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+            })
+            const existing = comments.find((comment) => comment.body.includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              })
+            }
+
+  update-badge:
+    name: Update frontend coverage badge
+    runs-on: ubuntu-latest
+    needs: test-coverage
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage-summary-${{ github.run_id }}
+          path: frontend/coverage
+
+      - name: Generate coverage badge
+        run: node scripts/generate-coverage-badge.mjs frontend/coverage/coverage-summary.json .github/badges/frontend-coverage.svg
+
+      - name: Commit coverage badge
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'ci: update frontend coverage badge'
+          file_pattern: .github/badges/frontend-coverage.svg
