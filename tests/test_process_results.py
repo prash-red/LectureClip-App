@@ -355,15 +355,7 @@ class TestHandler:
         import bedrock_utils
         event = event or {"transcriptUrl": TRANSCRIPT_URL, "mediaUrl": MEDIA_URI}
         fake = _FakeBedrockRuntime()
-        mock_segment_records = [
-            ("segment-0", 0.0, 1.0, "Hello world."),
-            ("segment-1", 1.0, 31.0, "This is speaker two."),
-        ]
-        with patch.object(bedrock_utils, "bedrock", fake), \
-             patch.object(transcript_utils, "s3", self._mock_s3()), \
-             patch.object(self.mod, "upsert_lecture", return_value="lecture-123"), \
-             patch.object(self.mod, "insert_segments", return_value=mock_segment_records), \
-             patch.object(self.mod, "insert_embeddings"):
+        with patch.object(bedrock_utils, "bedrock", fake):
             return self.mod.handler(event, {})
 
     def test_returns_200(self):
