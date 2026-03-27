@@ -2,6 +2,9 @@
 
 Serverless AWS backend for uploading lecture videos directly to S3 and transcribing them with Amazon Transcribe.
 
+![Frontend coverage](.github/badges/frontend-coverage.svg)
+![Backend coverage](.github/badges/backend-coverage.svg)
+
 ## Architecture
 
 ### Video Upload
@@ -52,6 +55,10 @@ S3 Event (via SNS)
 
 ```
 LectureClip-App/
+├── frontend/
+│   ├── src/                       # React + Vite frontend and Vitest test files
+│   ├── package.json               # Frontend scripts, dependencies, and coverage commands
+│   └── vite.config.ts             # Vite + Vitest coverage configuration
 ├── src/
 │   └── lambdas/
 │       ├── video-upload/
@@ -84,8 +91,13 @@ LectureClip-App/
 │   ├── invoke-local.sh            # Run a Lambda locally with SAM CLI
 │   └── deploy.sh                  # Build and deploy Lambdas to AWS
 ├── .github/
+│   ├── badges/
+│   │   ├── frontend-coverage.svg  # Repository-hosted frontend coverage badge
+│   │   └── backend-coverage.svg   # Repository-hosted backend coverage badge
 │   └── workflows/
-│       └── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
+│       ├── deploy-lambda.yml      # CI/CD — deploys on push to main when src/ changes
+│       ├── frontend-coverage.yml  # CI — runs Vitest coverage, comments on PRs, updates badge
+│       └── backend-coverage.yml   # CI — runs pytest coverage, comments on PRs, updates badge
 ├── pytest.ini                     # Points pytest at tests/
 └── template.yaml                  # SAM template (local dev + CI builds)
 ```
@@ -166,7 +178,36 @@ Supported formats: `mp4`, `mov`, `avi`, `webm`, `mpeg`, `mkv`
 
 Unit tests cover each Lambda handler and an end-to-end flow that mirrors `upload_video.py`. No AWS credentials or network access required — boto3 is mocked with `unittest.mock`.
 
-### Setup
+## Performance Profiling
+
+Backend profiling notes, hotspot rationale, and measured before/after results live in [`PERFORMANCE_PROFILING.md`](PERFORMANCE_PROFILING.md).
+
+### Frontend (Vitest)
+
+The frontend uses Vitest with Testing Library and `@vitest/coverage-istanbul`.
+
+```bash
+cd frontend
+npm install
+
+# Watch mode
+npm test
+
+# Single run
+npm run test:run
+
+# Coverage (text + html + lcov + json-summary)
+npm run test:coverage
+
+# Refresh the repository-hosted coverage badge locally
+npm run coverage:badge
+```
+
+Coverage output lands in `frontend/coverage/`.
+
+`.github/workflows/frontend-coverage.yml` runs automatically for frontend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/frontend-coverage.svg` on pushes to `main`.
+
+### Backend Setup
 
 ```bash
 python -m venv venv
@@ -174,7 +215,7 @@ source venv/bin/activate
 pip install -r tests/requirements.txt
 ```
 
-### Run
+### Backend Run
 
 ```bash
 # All tests
@@ -185,7 +226,22 @@ pytest tests/test_upload_flow.py
 
 # Verbose output
 pytest -v
+
+# Coverage (terminal + html + xml + json summary)
+pytest \
+  --cov \
+  --cov-report=term-missing \
+  --cov-report=html:backend-coverage/html \
+  --cov-report=xml:backend-coverage/coverage.xml \
+  --cov-report=json:backend-coverage/coverage-summary.json
+
+# Refresh the repository-hosted backend coverage badge locally
+node scripts/generate-coverage-badge.mjs backend-coverage/coverage-summary.json .github/badges/backend-coverage.svg "backend coverage"
 ```
+
+Coverage output lands in `backend-coverage/`.
+
+`.github/workflows/backend-coverage.yml` runs automatically for backend pushes and pull requests, uploads the coverage report as a workflow artifact, posts a coverage summary comment on non-fork PRs, and updates `.github/badges/backend-coverage.svg` on pushes to `main`.
 
 ### Test layout
 
@@ -228,12 +284,12 @@ def test_something(mock_s3):
    MyNewFunction:
      Type: AWS::Serverless::Function
      Properties:
-       FunctionName: lectureclip-my-new-function
+       FunctionName: !Sub "lectureclip-${Environment}-my-new-function"
        Handler: index.handler
        CodeUri: src/lambdas/my-new-function/
    ```
 
-   The `Globals` block already sets `Runtime: python3.13`, `Timeout: 30`, and injects `BUCKET_NAME` / `REGION` as environment variables — no need to repeat those.
+   The `Globals` block already sets `Runtime: python3.13`, `Timeout: 30`, and injects `BUCKET_NAME` / `REGION` as environment variables — no need to repeat those. The `Environment` SAM parameter is set to `dev` or `prod` at build time.
 
 3. **Add a sample event payload:**
 
@@ -244,8 +300,10 @@ def test_something(mock_s3):
 4. **Register it in `scripts/deploy.sh`** by adding an entry to `ALL_FUNCTIONS`:
 
    ```bash
-   "my-new-function|MyNewFunction|lectureclip-my-new-function|src/lambdas/my-new-function/my_new_function.zip"
+   "my-new-function|MyNewFunction"
    ```
+
+   The Lambda function name is derived automatically as `lectureclip-{env}-my-new-function` at deploy time.
 
 5. **Register it in `scripts/invoke-local.sh`** by adding a case in the function resolver:
 
@@ -256,7 +314,7 @@ def test_something(mock_s3):
      ;;
    ```
 
-6. **Add a deploy job to `.github/workflows/deploy-lambda.yml`** following the pattern of the existing jobs (checkout → configure AWS credentials → SAM setup → `sam build MyNewFunction` → `aws-lambda-deploy`).
+6. **Add a deploy job to `.github/workflows/deploy-lambda.yml`** following the pattern of the existing jobs: add `needs: resolve-env`, use `needs.resolve-env.outputs.role` for the IAM role, and set the function name to `lectureclip-${{ needs.resolve-env.outputs.env_name }}-my-new-function`.
 
 7. **Add tests in `tests/`** — create `tests/test_my_new_function.py` following the pattern of the existing test files: load the handler with `load_lambda("my-new-function")`, patch `s3_client`, and call `mod.handler(make_event({...}), {})`.
 
@@ -277,35 +335,36 @@ export AWS_PROFILE=<your-profile-name>
 
 ### Automated (CI/CD)
 
-Pushing to `main` with changes under `src/` triggers `.github/workflows/deploy-lambda.yml`. Each Lambda is built and deployed in a separate parallel job.
+Pushing to `main` or `develop` with changes under `src/lambdas/` triggers `.github/workflows/deploy-lambda.yml`. A `resolve-env` job maps the branch to the target environment (`develop` → dev, `main` → prod), then each Lambda is built and deployed in a separate parallel job using the appropriate role and the `lectureclip-{env}-{function}` naming convention.
 
 Required GitHub Actions variables (set under Settings → Variables):
 
 | Variable | Description |
 |----------|-------------|
 | `AWS_REGION` | e.g. `ca-central-1` |
-| `AWS_ROLE_TO_ASSUME` | IAM role ARN for OIDC federation |
+| `AWS_ROLE_TO_ASSUME_DEV` | IAM role ARN for OIDC federation (dev environment) |
+| `AWS_ROLE_TO_ASSUME_PROD` | IAM role ARN for OIDC federation (prod environment) |
 
 ### Manual
 
 ```bash
-# Deploy all three functions
+# Deploy all functions to dev (default)
 ./scripts/deploy.sh
 
-# Deploy a single function
-./scripts/deploy.sh --function video-upload
+# Deploy all functions to prod
+./scripts/deploy.sh --env prod
 
-# Override bucket or region
-./scripts/deploy.sh --bucket lectureclip-lambda-artifacts-123456789 --region us-east-1
+# Deploy a single function
+./scripts/deploy.sh --env dev --function video-upload
+
+# Override region
+./scripts/deploy.sh --env prod --region us-east-1
 
 # Use a specific AWS profile
-AWS_PROFILE=dev ./scripts/deploy.sh --function multipart-init
+AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function multipart-init
 ```
 
 The deploy script:
-1. Runs `sam build` (installs any `requirements.txt` into the build artifact)
+1. Runs `sam build --parameter-overrides Environment={env}` (installs any `requirements.txt` into the build artifact)
 2. Zips the build output
-3. Uploads the zip to `s3://lectureclip-lambda-artifacts-{ACCOUNT_ID}/lambdas/{function}/{function}.zip`
-4. Calls `aws lambda update-function-code` and waits for the update to propagate
-
-The artifacts bucket name is auto-resolved from `aws sts get-caller-identity` if `--bucket` is not provided.
+3. Calls `aws lambda update-function-code --zip-file` directly to `lectureclip-{env}-{function}` and waits for the update to propagate

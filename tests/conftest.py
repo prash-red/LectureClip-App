@@ -14,6 +14,8 @@ os.environ.setdefault("BUCKET_NAME", "test-bucket")
 os.environ.setdefault("REGION", "us-east-1")
 # boto3 reads AWS_DEFAULT_REGION, not REGION.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AURORA_CLUSTER_ARN", "arn:aws:cluster:us-east-1:123456789012:cluster")
+os.environ.setdefault("AURORA_SECRET_ARN", "arn:aws:secret:us-east-1:123456789012:secret")
 
 # process-transcribe imports sibling modules (transcribe_utils, etc.) by bare
 # name, so its directory must be on sys.path before load_lambda runs.
@@ -32,9 +34,20 @@ _PROCESS_RESULTS_DIR = os.path.join(
 if _PROCESS_RESULTS_DIR not in sys.path:
     sys.path.insert(0, _PROCESS_RESULTS_DIR)
 
+# query-segments imports bedrock_utils and aurora_utils as sibling modules.
+_QUERY_SEGMENTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "src", "lambdas", "query-segments",
+)
+if _QUERY_SEGMENTS_DIR not in sys.path:
+    sys.path.insert(0, _QUERY_SEGMENTS_DIR)
+
 os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:TestMachine")
 os.environ.setdefault("TRANSCRIBE_TABLE", "test-transcribe-table")
 os.environ.setdefault("TRANSCRIPTS_BUCKET", "test-transcripts-bucket")
+os.environ.setdefault("AURORA_CLUSTER_ARN", "arn:aws:rds:us-east-1:123456789012:cluster:test")
+os.environ.setdefault("AURORA_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:test")
+os.environ.setdefault("AURORA_DB_NAME", "lectureclip")
 
 import importlib.util
 import json
@@ -42,6 +55,25 @@ import json
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_BUCKET = os.environ["BUCKET_NAME"]
 TEST_USER_ID = "user-test-123"
+
+
+def load_module(lambda_name: str, module_name: str):
+    """
+    Load a helper module from a specific Lambda directory and register it in
+    sys.modules under the bare module name.
+    """
+    lambda_dir = os.path.join(REPO_ROOT, "src", "lambdas", lambda_name)
+    path = os.path.join(lambda_dir, f"{module_name}.py")
+    sys.modules.pop(module_name, None)
+    sys.path.insert(0, lambda_dir)
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(lambda_dir)
+    return mod
 
 
 def load_lambda(name: str):

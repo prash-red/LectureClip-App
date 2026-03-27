@@ -4,26 +4,38 @@
 # SAM builds each function (installs requirements.txt), zips the output,
 # and calls update-function-code with --zip-file. No S3 bucket required.
 #
+# After deploying db-migrate, the script automatically invokes it
+# synchronously to apply any pending schema changes to Aurora.
+#
 # Usage:
-#   ./scripts/deploy.sh [--function <name>] [--region <region>]
+#   ./scripts/deploy.sh [--env <dev|prod>] [--function <name>] [--region <region>]
+#
+# Environments:
+#   dev   (default) — targets lectureclip-dev-* Lambda functions
+#   prod            — targets lectureclip-prod-* Lambda functions
 #
 # Functions:
-#   video-upload        (default: all six)
+#   video-upload        (default: all)
 #   multipart-init
 #   multipart-complete
 #   s3-trigger
 #   start-transcribe
 #   process-transcribe
+#   process-results
+#   db-migrate
+#   query-segments
 #
 # Prerequisites:
 #   - AWS SAM CLI  (sam build requires Docker or --use-container)
 #   - AWS CLI with credentials that have:
-#       lambda:UpdateFunctionCode on lectureclip-* functions
+#       lambda:UpdateFunctionCode on lectureclip-{env}-* functions
+#       lambda:InvokeFunction     on lectureclip-{env}-db-migrate
 #
 # Examples:
 #   ./scripts/deploy.sh
-#   ./scripts/deploy.sh --function video-upload
-#   AWS_PROFILE=dev ./scripts/deploy.sh --function s3-trigger
+#   ./scripts/deploy.sh --env prod
+#   ./scripts/deploy.sh --env dev --function video-upload
+#   AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function s3-trigger
 
 set -euo pipefail
 
@@ -39,12 +51,14 @@ step() { echo ""; echo "▸ $*"; }
 # ── defaults ──────────────────────────────────────────────────────────────────
 
 REGION="${AWS_DEFAULT_REGION:-${AWS_REGION:-ca-central-1}}"
+ENV="dev"            # dev or prod
 FILTER_FUNCTION=""   # empty = deploy all
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --env)      ENV="$2";             shift 2 ;;
     --function) FILTER_FUNCTION="$2"; shift 2 ;;
     --region)   REGION="$2";          shift 2 ;;
     -h|--help)
@@ -55,17 +69,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+[[ "$ENV" == "dev" || "$ENV" == "prod" ]] || err "--env must be 'dev' or 'prod' (got '$ENV')"
+
 # ── function registry ─────────────────────────────────────────────────────────
-# Format: "short-name|SAM-logical-id|lambda-function-name"
+# Format: "short-name|SAM-logical-id"
+# Lambda function name is derived at deploy time: lectureclip-{env}-{short-name}
 
 ALL_FUNCTIONS=(
-  "video-upload|VideoUploadFunction|lectureclip-video-upload"
-  "multipart-init|MultipartInitFunction|lectureclip-multipart-init"
-  "multipart-complete|MultipartCompleteFunction|lectureclip-multipart-complete"
-  "s3-trigger|S3TriggerFunction|lectureclip-s3-trigger"
-  "start-transcribe|StartTranscribeFunction|lectureclip-start-transcribe"
-  "process-transcribe|ProcessTranscribeFunction|lectureclip-process-transcribe"
-  "process-results|ProcessResultsFunction|lectureclip-process-results"
+  "video-upload|VideoUploadFunction"
+  "multipart-init|MultipartInitFunction"
+  "multipart-complete|MultipartCompleteFunction"
+  "s3-trigger|S3TriggerFunction"
+  "start-transcribe|StartTranscribeFunction"
+  "process-transcribe|ProcessTranscribeFunction"
+  "process-results|ProcessResultsFunction"
+  "db-migrate|DbMigrateFunction"
+  "query-segments|QuerySegmentsFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -78,11 +97,12 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""
+echo "  env     : $ENV"
 echo "  region  : $REGION"
 echo "  deploy  : $(names=(); for e in "${FUNCTIONS_TO_DEPLOY[@]}"; do names+=("${e%%|*}"); done; IFS=', '; echo "${names[*]}")"
 
@@ -90,12 +110,15 @@ echo "  deploy  : $(names=(); for e in "${FUNCTIONS_TO_DEPLOY[@]}"; do names+=("
 
 step "sam build"
 
+SAM_PARAM_OVERRIDES="Environment=$ENV"
+
 if [[ -n "$FILTER_FUNCTION" ]]; then
   LOGICAL_ID="${FUNCTIONS_TO_DEPLOY[0]#*|}"
-  LOGICAL_ID="${LOGICAL_ID%%|*}"
-  sam build "$LOGICAL_ID" --template template.yaml --region "$REGION"
+  sam build "$LOGICAL_ID" --template template.yaml --region "$REGION" \
+    --parameter-overrides "$SAM_PARAM_OVERRIDES"
 else
-  sam build --template template.yaml --region "$REGION"
+  sam build --template template.yaml --region "$REGION" \
+    --parameter-overrides "$SAM_PARAM_OVERRIDES"
 fi
 
 BUILD_DIR=".aws-sam/build"
@@ -103,7 +126,8 @@ BUILD_DIR=".aws-sam/build"
 # ── package & deploy each function ───────────────────────────────────────────
 
 for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
-  IFS='|' read -r short_name logical_id lambda_name <<< "$entry"
+  IFS='|' read -r short_name logical_id <<< "$entry"
+  lambda_name="lectureclip-${ENV}-${short_name}"
 
   step "$short_name"
 
@@ -133,6 +157,38 @@ for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
 
   log "done ✓"
 done
+
+# ── run db-migrate if it was deployed ────────────────────────────────────────
+# db-migrate is idempotent (all DDL uses IF NOT EXISTS) so invoking it on
+# every deploy is safe and ensures the schema is always up to date.
+
+DB_MIGRATE_DEPLOYED=false
+for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
+  [[ "${entry%%|*}" == "db-migrate" ]] && DB_MIGRATE_DEPLOYED=true && break
+done
+
+if [[ "$DB_MIGRATE_DEPLOYED" == "true" ]]; then
+  step "invoking db-migrate"
+  RESPONSE_FILE="/tmp/db-migrate-response-$(date +%s).json"
+  INVOKE_META=$(aws lambda invoke \
+    --function-name "lectureclip-${ENV}-db-migrate" \
+    --invocation-type RequestResponse \
+    --region "$REGION" \
+    --output json \
+    --payload '{}' \
+    "$RESPONSE_FILE" 2>&1)
+
+  if echo "$INVOKE_META" | grep -q '"FunctionError"'; then
+    log "db-migrate response:"
+    cat "$RESPONSE_FILE" >&2
+    rm -f "$RESPONSE_FILE"
+    err "db-migrate Lambda reported a function error — schema migration failed"
+  fi
+
+  log "db-migrate response: $(cat "$RESPONSE_FILE")"
+  rm -f "$RESPONSE_FILE"
+  log "done ✓"
+fi
 
 echo ""
 echo "  Deploy complete."
