@@ -3,11 +3,11 @@ End-to-end upload flow tests mirroring upload_video.py.
 
 upload_video.py decides which path to take based on file size:
 
-  Direct upload (file ≤ 100 MB)
+  Direct upload (file ≤ 10 MB)
     1. POST /upload              → presigned PUT URL + fileKey
     2. PUT file to presigned URL  (client → S3 directly; simulated here)
 
-  Multipart upload (file > 100 MB)
+  Multipart upload (file > 10 MB)
     1. POST /multipart/init      → uploadId + fileKey + per-part presigned URLs
     2. PUT each 100 MB chunk      (client → S3 directly; simulated here)
     3. POST /multipart/complete   → finalize with collected ETags → location
@@ -25,8 +25,8 @@ video_upload = load_lambda("video-upload")
 multipart_init = load_lambda("multipart-init")
 multipart_complete = load_lambda("multipart-complete")
 
-PART_SIZE = 100 * 1024 * 1024        # 100 MB
-DIRECT_THRESHOLD = 100 * 1024 * 1024  # upload_video.py's DIRECT_UPLOAD_THRESHOLD
+PART_SIZE = 10 * 1024 * 1024        # 100 MB
+DIRECT_THRESHOLD = 10 * 1024 * 1024  # upload_video.py's DIRECT_UPLOAD_THRESHOLD
 
 
 class TestDirectUploadFlow:
@@ -36,7 +36,7 @@ class TestDirectUploadFlow:
     """
 
     def test_small_file_receives_presigned_put_url(self):
-        file_size = 50 * 1024 * 1024  # 50 MB — well under threshold
+        file_size = 5 * 1024 * 1024  # 5 MB — well under the 10 MB threshold
         assert file_size <= DIRECT_THRESHOLD
 
         presigned_url = "https://s3.amazonaws.com/presigned-put"

@@ -61,7 +61,7 @@ class TestEmbedText:
         with patch.object(self.mod, "bedrock", fake):
             self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
         body = json.loads(fake.last_kwargs["body"])
-        assert body["dimensions"] == 512
+        assert body["embeddingConfig"]["outputEmbeddingLength"] == 512
 
     def test_returns_embedding_vector(self):
         fake = _FakeBedrockRuntime()

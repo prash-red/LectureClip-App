@@ -4,7 +4,7 @@ import os
 from bedrock_utils import embed_text
 from aurora_utils import search_segments
 
-EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
 EMBEDDING_DIM      = int(os.environ.get("EMBEDDING_DIM", "1024"))
 BUCKET_NAME        = os.environ.get("BUCKET_NAME")
 

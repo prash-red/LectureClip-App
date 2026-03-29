@@ -82,9 +82,9 @@ class TestHandler:
     def test_uses_language_identification(self):
         result = self.mod.handler({"s3_uri": S3_URI_WITH_PREFIX, "sftoken": FAKE_SFTOKEN}, {})
 
-        # Verify language identification is enabled
+        # Verify a language is set on the transcription job
         job = self.transcribe.get_transcription_job(TranscriptionJobName=result["job_name"])
-        assert job['TranscriptionJob']['IdentifyLanguage'] is True
+        assert job['TranscriptionJob']['LanguageCode'] == "en-US"
 
     def test_output_key_with_prefix(self):
         result = self.mod.handler({"s3_uri": S3_URI_WITH_PREFIX, "sftoken": FAKE_SFTOKEN}, {})

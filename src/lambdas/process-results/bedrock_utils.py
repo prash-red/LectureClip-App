@@ -7,25 +7,27 @@ github.com/build-on-aws/langchain-embeddings (03-audio-video-workflow)
 
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import boto3
 
 bedrock = boto3.client("bedrock-runtime")
 
+def generate_body_for_titan(text, embedding_dim):
+    return json.dumps({
+        "inputText": text,
+        "embeddingConfig": {
+            "outputEmbeddingLength": embedding_dim,
+        },
+    })
 
 def embed_text(text, model_id, embedding_dim):
     """
     Call Bedrock and return the embedding vector for *text*.
 
-    Uses the Titan Embed Text v2 request format:
-        { "inputText": "...", "dimensions": N, "normalize": true }
     """
-    body = json.dumps({
-        "inputText": text,
-        "dimensions": embedding_dim,
-        "normalize": True,
-    })
+    body = generate_body_for_titan(text, embedding_dim)
     response = bedrock.invoke_model(
         body=body,
         modelId=model_id,
@@ -44,26 +46,27 @@ def generate_text_embeddings(segments, source_uri, model_id, embedding_dim):
     full list for logging and will persist it in a future iteration.
     """
     filename = source_uri.rsplit("/", 1)[-1] if source_uri else ""
-    results = []
-    append_result = results.append
     embed = embed_text
-    new_id = uuid.uuid4
     created_at = datetime.now(timezone.utc).isoformat()
 
-    for start_second, speaker, text in segments:
-        vector = embed(text, model_id, embedding_dim)
-        append_result({
-            "id":           str(new_id()),
-            "embedding":    vector,
-            "text":         text,
+    def _embed(args):
+        idx, (start_second, speaker, text) = args
+        return idx, {
+            "id": str(uuid.uuid4()),
+            "embedding": embed(text, model_id, embedding_dim),
+            "text": text,
             "start_second": start_second,
-            "speaker":      speaker,
-            "source":       filename,
-            "source_uri":   source_uri,
-            "model_id":     model_id,
+            "speaker": speaker,
+            "source": filename,
+            "source_uri": source_uri,
+            "model_id": model_id,
             # All records belong to the same embedding batch, so one timestamp
             # avoids repeating datetime formatting work in the hot loop.
-            "created_at":   created_at,
-        })
+            "created_at": created_at,
+        }
 
+    results = [None] * len(segments)
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for idx, record in pool.map(_embed, enumerate(segments)):
+            results[idx] = record
     return results

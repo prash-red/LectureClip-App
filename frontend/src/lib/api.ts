@@ -4,16 +4,12 @@ import type { Segment, TranscriptSegment } from '@/lib/types.ts'
 // Example .env.local:  VITE_API_BASE_URL=https://abc123.execute-api.ca-central-1.amazonaws.com/dev
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
-const DIRECT_UPLOAD_THRESHOLD = 100 * 1024 * 1024 // 100 MB
+const DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024 // 10 MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024 // 5 GB
-const ALLOWED_FORMATS = ['mp4', 'mov', 'avi', 'webm', 'mpeg', 'mkv']
+const ALLOWED_FORMATS = ['mp4', 'mov']
 const CONTENT_TYPES: Record<string, string> = {
   mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  avi: 'video/x-msvideo',
-  webm: 'video/webm',
-  mpeg: 'video/mpeg',
-  mkv: 'video/x-matroska',
+  mov: 'video/mov',
 }
 
 function getContentType(file: File): string {
@@ -67,29 +63,35 @@ async function multipartUpload(file: File, onProgress?: (pct: number) => void): 
     partSize: number
   }
 
+  const CONCURRENCY = 4
   const uploadedParts: { PartNumber: number; ETag: string }[] = []
+  let completed = 0
 
-  for (let i = 0; i < presignedUrls.length; i++) {
-    const { partNumber, uploadUrl } = presignedUrls[i]
+  async function uploadPart(partNumber: number, uploadUrl: string) {
     const start = (partNumber - 1) * partSize
     const chunk = file.slice(start, start + partSize)
-
     const res = await fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': contentType },
       body: chunk,
     })
     if (!res.ok) throw new Error(`Part ${partNumber} upload failed: ${res.status}`)
-
     const etag = res.headers.get('ETag')?.replace(/"/g, '') ?? ''
     uploadedParts.push({ PartNumber: partNumber, ETag: etag })
-    onProgress?.(((i + 1) / presignedUrls.length) * 100)
+    completed++
+    onProgress?.((completed / presignedUrls.length) * 100)
+  }
+
+  // Upload in batches of CONCURRENCY to avoid overwhelming the connection
+  for (let i = 0; i < presignedUrls.length; i += CONCURRENCY) {
+    const batch = presignedUrls.slice(i, i + CONCURRENCY)
+    await Promise.all(batch.map(({ partNumber, uploadUrl }) => uploadPart(partNumber, uploadUrl)))
   }
 
   const completeRes = await fetch(`${API_BASE}/multipart/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uploadId, fileKey, parts: uploadedParts }),
+    body: JSON.stringify({ uploadId, fileKey, parts: uploadedParts.sort((a, b) => a.PartNumber - b.PartNumber) }),
   })
   if (!completeRes.ok) throw new Error(`Multipart complete failed: ${completeRes.status}`)
 

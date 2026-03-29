@@ -30,6 +30,17 @@ def _execute(sql, params=None):
     return rds_data.execute_statement(**kwargs)
 
 
+def _batch_execute(sql, parameter_sets):
+    """Run one SQL statement against multiple parameter sets in a single RDS Data API call."""
+    return rds_data.batch_execute_statement(
+        resourceArn=CLUSTER_ARN,
+        secretArn=SECRET_ARN,
+        database=DB_NAME,
+        sql=sql,
+        parameterSets=parameter_sets,
+    )
+
+
 def upsert_lecture(video_uri):
     """
     Insert a lecture row keyed by a deterministic UUID derived from video_uri.
@@ -63,19 +74,27 @@ def insert_segments(lecture_id, segments):
     end_s for each segment is estimated as the start_s of the next segment (or +30 s
     for the last one).
     """
-    records = []
-    append_record = records.append
-    execute = _execute
     namespace = uuid.NAMESPACE_URL
-    make_segment_id = uuid.uuid5
     last_index = len(segments) - 1
+    records = []
+    parameter_sets = []
 
-    # TODO: batch the insert call
     for idx, (start_s, _speaker, text) in enumerate(segments):
         start_s_float = float(start_s)
         end_s = float(segments[idx + 1][0]) if idx < last_index else start_s_float + 30.0
-        segment_id = str(make_segment_id(namespace, f"{lecture_id}:{idx}"))
-        execute(
+        segment_id = str(uuid.uuid5(namespace, f"{lecture_id}:{idx}"))
+        records.append((segment_id, start_s_float, end_s, text))
+        parameter_sets.append([
+            {"name": "sid",     "value": {"stringValue": segment_id}},
+            {"name": "lid",     "value": {"stringValue": lecture_id}},
+            {"name": "idx",     "value": {"longValue":   idx}},
+            {"name": "start_s", "value": {"doubleValue": start_s_float}},
+            {"name": "end_s",   "value": {"doubleValue": end_s}},
+            {"name": "text",    "value": {"stringValue": text}},
+        ])
+
+    if parameter_sets:
+        _batch_execute(
             """
             INSERT INTO segments (segment_id, lecture_id, idx, start_s, end_s, text)
             VALUES (:sid::uuid, :lid::uuid, :idx, :start_s, :end_s, :text)
@@ -84,21 +103,12 @@ def insert_segments(lecture_id, segments):
                     end_s   = EXCLUDED.end_s,
                     text    = EXCLUDED.text
             """,
-            [
-                {"name": "sid",     "value": {"stringValue": segment_id}},
-                {"name": "lid",     "value": {"stringValue": lecture_id}},
-                {"name": "idx",     "value": {"longValue":   idx}},
-                {"name": "start_s", "value": {"doubleValue": start_s_float}},
-                {"name": "end_s",   "value": {"doubleValue": end_s}},
-                {"name": "text",    "value": {"stringValue": text}},
-            ],
+            parameter_sets,
         )
-        append_record((segment_id, start_s_float, end_s, text))
     return records
 
 
 def insert_embeddings(segment_records, embeddings, model_id):
-    # TODO: Batch the RDS execute call
     """
     Insert embedding vectors into segment_embeddings.
 
@@ -106,25 +116,65 @@ def insert_embeddings(segment_records, embeddings, model_id):
     embeddings:      list of dicts with 'embedding' key from bedrock_utils
     model_id:        Bedrock model ID string stored alongside each vector
     """
-    execute = _execute
-    new_embedding_id = uuid.uuid4
-    vector_to_str = json.dumps
-
+    parameter_sets = []
     for (segment_id, *_), emb_record in zip(segment_records, embeddings):
-        embedding_id = str(new_embedding_id())
+        embedding_id = str(uuid.uuid4())
         # json.dumps runs in C and already emits the pgvector-compatible list
         # syntax we need when separators remove whitespace.
-        vector_str = vector_to_str(emb_record["embedding"], separators=(",", ":"))
-        execute(
+        vector_str = json.dumps(emb_record["embedding"], separators=(",", ":"))
+        parameter_sets.append([
+            {"name": "eid",      "value": {"stringValue": embedding_id}},
+            {"name": "sid",      "value": {"stringValue": segment_id}},
+            {"name": "vec",      "value": {"stringValue": vector_str}},
+            {"name": "model_id", "value": {"stringValue": model_id}},
+        ])
+
+    if parameter_sets:
+        _batch_execute(
             """
             INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id)
             VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id)
             ON CONFLICT DO NOTHING
             """,
-            [
-                {"name": "eid",      "value": {"stringValue": embedding_id}},
-                {"name": "sid",      "value": {"stringValue": segment_id}},
-                {"name": "vec",      "value": {"stringValue": vector_str}},
-                {"name": "model_id", "value": {"stringValue": model_id}},
-            ],
+            parameter_sets,
+        )
+
+
+def insert_frame_embeddings(segment_records, frame_emb_data, model_id):
+    """
+    Insert pre-computed image embedding vectors produced by the segment-frame
+    container into segment_embeddings.
+
+    Each frame embedding is linked to the same segment row as the paired text
+    embedding — identified by position index (idx) — so callers can retrieve
+    both modalities for a segment via a single segment_id lookup.
+
+    segment_records: list of (segment_id, start_s, end_s, text) from insert_segments
+    frame_emb_data:  list of {idx, start_s, end_s, speaker, embedding} from S3 JSON
+    model_id:        Bedrock image model ID (e.g. 'amazon.titan-embed-image-v1')
+    """
+    idx_to_segment_id = {i: rec[0] for i, rec in enumerate(segment_records)}
+
+    parameter_sets = []
+    for entry in frame_emb_data:
+        segment_id = idx_to_segment_id.get(entry.get("idx"))
+        if segment_id is None:
+            continue
+        embedding_id = str(uuid.uuid4())
+        vector_str = json.dumps(entry["embedding"], separators=(",", ":"))
+        parameter_sets.append([
+            {"name": "eid",      "value": {"stringValue": embedding_id}},
+            {"name": "sid",      "value": {"stringValue": segment_id}},
+            {"name": "vec",      "value": {"stringValue": vector_str}},
+            {"name": "model_id", "value": {"stringValue": model_id}},
+        ])
+
+    if parameter_sets:
+        _batch_execute(
+            """
+            INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id)
+            VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id)
+            ON CONFLICT DO NOTHING
+            """,
+            parameter_sets,
         )

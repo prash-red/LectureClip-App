@@ -19,14 +19,24 @@ rds_data = boto3.client("rds-data")
 # HNSW index on segment_embeddings uses vector_cosine_ops so this query is
 # index-accelerated.  Results are filtered to a single lecture and limited
 # to k rows.
+# DISTINCT ON (se.segment_id) ensures at most one row per segment even when
+# both a text embedding and a frame embedding for the same chunk score in the
+# top-k results (which happens when text and frames share the same model).
+# The inner ORDER BY picks the highest-scoring modality for each segment;
+# the outer query re-sorts the deduplicated rows before applying LIMIT.
 _SEARCH_SQL = """
-SELECT s.start_s,
-       s.end_s,
-       1 - (se.embedding <=> :vec::vector) AS similarity
-FROM   segment_embeddings se
-JOIN   segments s ON se.segment_id = s.segment_id
-JOIN   lectures l ON s.lecture_id  = l.lecture_id
-WHERE  l.video_uri = :video_uri
+SELECT start_s, end_s, similarity
+FROM (
+    SELECT DISTINCT ON (se.segment_id)
+           s.start_s,
+           s.end_s,
+           1 - (se.embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings se
+    JOIN   segments s ON se.segment_id = s.segment_id
+    JOIN   lectures l ON s.lecture_id  = l.lecture_id
+    WHERE  l.video_uri = :video_uri
+    ORDER  BY se.segment_id, similarity DESC
+) deduped
 ORDER  BY similarity DESC
 LIMIT  :k
 """
@@ -48,6 +58,8 @@ def search_segments(video_uri: str, embedding: list, k: int) -> list:
     Returns
     -------
     list of {"start": float, "end": float} dicts, ordered by similarity.
+    Each segment appears at most once — the highest-scoring embedding modality
+    (text or frame) wins when both land in the candidate set.
     """
     vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
 
