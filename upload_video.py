@@ -22,8 +22,8 @@ class UploadConfig:
 
     # File size limits
     MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
-    CHUNK_SIZE = 5 * 1024 * 1024  # 5MB for multipart uploads
-    DIRECT_UPLOAD_THRESHOLD = 100 * 1024 * 1024  # 100MB - use multipart above this
+    CHUNK_SIZE = 10 * 1024 * 1024  # 10MB for multipart uploads
+    DIRECT_UPLOAD_THRESHOLD = 10 * 1024 * 1024  # 10MB - use multipart above this
 
     # Allowed video formats
     ALLOWED_FORMATS = ['mp4', 'mov', 'avi', 'webm', 'mpeg', 'mkv']

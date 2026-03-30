@@ -8,10 +8,11 @@
 # synchronously to apply any pending schema changes to Aurora.
 #
 # Usage:
-#   ./scripts/deploy.sh [--env <dev|prod>] [--function <name>] [--region <region>]
+#   ./scripts/deploy.sh [--env <dev|eval|prod>] [--function <name>] [--region <region>]
 #
 # Environments:
 #   dev   (default) — targets lectureclip-dev-* Lambda functions
+#   eval            — targets lectureclip-eval-* Lambda functions
 #   prod            — targets lectureclip-prod-* Lambda functions
 #
 # Functions:
@@ -24,6 +25,7 @@
 #   process-results
 #   db-migrate
 #   query-segments
+#   query-segments-info
 #
 # Prerequisites:
 #   - AWS SAM CLI  (sam build requires Docker or --use-container)
@@ -34,6 +36,7 @@
 # Examples:
 #   ./scripts/deploy.sh
 #   ./scripts/deploy.sh --env prod
+#   ./scripts/deploy.sh --env eval --function query-segments
 #   ./scripts/deploy.sh --env dev --function video-upload
 #   AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function s3-trigger
 
@@ -51,16 +54,20 @@ step() { echo ""; echo "▸ $*"; }
 # ── defaults ──────────────────────────────────────────────────────────────────
 
 REGION="${AWS_DEFAULT_REGION:-${AWS_REGION:-ca-central-1}}"
-ENV="dev"            # dev or prod
-FILTER_FUNCTION=""   # empty = deploy all
+ENV="dev"                  # dev, eval, or prod
+FILTER_FUNCTION=""         # empty = deploy all
+EMBEDDING_MODEL_ID=""      # overrides EmbeddingModelId SAM parameter
+MODAL_EMBEDDING_URL=""     # overrides ModalEmbeddingUrl SAM parameter
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --env)      ENV="$2";             shift 2 ;;
-    --function) FILTER_FUNCTION="$2"; shift 2 ;;
-    --region)   REGION="$2";          shift 2 ;;
+    --env)                  ENV="$2";                  shift 2 ;;
+    --function)             FILTER_FUNCTION="$2";      shift 2 ;;
+    --region)               REGION="$2";               shift 2 ;;
+    --embedding-model-id)   EMBEDDING_MODEL_ID="$2";   shift 2 ;;
+    --modal-embedding-url)  MODAL_EMBEDDING_URL="$2";  shift 2 ;;
     -h|--help)
       sed -n '/^# Usage:/,/^[^#]/{ /^#/{ s/^# \?//; p } }' "$0"
       exit 0
@@ -69,7 +76,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$ENV" == "dev" || "$ENV" == "prod" ]] || err "--env must be 'dev' or 'prod' (got '$ENV')"
+[[ "$ENV" == "dev" || "$ENV" == "eval" || "$ENV" == "prod" ]] || err "--env must be 'dev', 'eval', or 'prod' (got '$ENV')"
 
 # ── function registry ─────────────────────────────────────────────────────────
 # Format: "short-name|SAM-logical-id"
@@ -85,6 +92,10 @@ ALL_FUNCTIONS=(
   "process-results|ProcessResultsFunction"
   "db-migrate|DbMigrateFunction"
   "query-segments|QuerySegmentsFunction"
+  "query-segments-info|QuerySegmentsInfoFunction"
+  "chat|ChatFunction"
+  "register-user|RegisterUserFunction"
+  "list-lectures|ListLecturesFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -97,7 +108,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments | query-segments-info | chat | register-user | list-lectures"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
@@ -157,6 +168,62 @@ for entry in "${FUNCTIONS_TO_DEPLOY[@]}"; do
 
   log "done ✓"
 done
+
+# ── update embedding env vars ────────────────────────────────────────────────
+# Only runs when --embedding-model-id or --modal-embedding-url is passed.
+# Merges the new values into each lambda's existing env vars (preserving the
+# Terraform-managed AURORA_* vars) via update-function-configuration.
+
+EMBEDDING_LAMBDAS=("process-results" "query-segments" "query-segments-info" "chat")
+
+update_embedding_env() {
+  local short_name="$1"
+  local lambda_name="lectureclip-${ENV}-${short_name}"
+
+  log "fetching current env vars: $lambda_name"
+  local current_vars
+  current_vars=$(aws lambda get-function-configuration \
+    --function-name "$lambda_name" \
+    --region "$REGION" \
+    --query 'Environment.Variables' \
+    --output json 2>/dev/null || echo '{}')
+
+  local cfg_file
+  cfg_file=$(mktemp --suffix=.json)
+
+  python3 - "$lambda_name" "$current_vars" "$EMBEDDING_MODEL_ID" "$MODAL_EMBEDDING_URL" \
+    > "$cfg_file" << 'PYEOF'
+import json, sys
+name, vars_json, model_id, modal_url = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+env = json.loads(vars_json)
+if model_id: env['EMBEDDING_MODEL_ID'] = model_id
+if modal_url: env['MODAL_EMBEDDING_URL'] = modal_url
+print(json.dumps({"FunctionName": name, "Environment": {"Variables": env}}))
+PYEOF
+
+  log "updating env vars: $lambda_name"
+  aws lambda update-function-configuration \
+    --cli-input-json "file://$cfg_file" \
+    --region "$REGION" \
+    --output text \
+    --query 'FunctionName' > /dev/null
+
+  rm -f "$cfg_file"
+
+  log "waiting for update to complete..."
+  aws lambda wait function-updated \
+    --function-name "$lambda_name" \
+    --region "$REGION"
+
+  log "done ✓"
+}
+
+if [[ -n "$EMBEDDING_MODEL_ID" || -n "$MODAL_EMBEDDING_URL" ]]; then
+  step "updating embedding env vars"
+  for short_name in "${EMBEDDING_LAMBDAS[@]}"; do
+    update_embedding_env "$short_name"
+  done
+fi
 
 # ── run db-migrate if it was deployed ────────────────────────────────────────
 # db-migrate is idempotent (all DDL uses IF NOT EXISTS) so invoking it on

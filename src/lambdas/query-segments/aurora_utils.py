@@ -19,20 +19,48 @@ rds_data = boto3.client("rds-data")
 # HNSW index on segment_embeddings uses vector_cosine_ops so this query is
 # index-accelerated.  Results are filtered to a single lecture and limited
 # to k rows.
-_SEARCH_SQL = """
-SELECT s.start_s,
-       s.end_s,
-       1 - (se.embedding <=> :vec::vector) AS similarity
-FROM   segment_embeddings se
-JOIN   segments s ON se.segment_id = s.segment_id
-JOIN   lectures l ON s.lecture_id  = l.lecture_id
-WHERE  l.video_uri = :video_uri
+# DISTINCT ON (se.segment_id) ensures at most one row per segment even when
+# both a text embedding and a frame embedding for the same chunk score in the
+# top-k results (which happens when text and frames share the same model).
+# The inner ORDER BY picks the highest-scoring modality for each segment;
+# the outer query re-sorts the deduplicated rows before applying LIMIT.
+_SEARCH_SQL_ALL = """
+SELECT start_s, end_s, similarity
+FROM (
+    SELECT DISTINCT ON (se.segment_id)
+           s.start_s,
+           s.end_s,
+           1 - (se.embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings se
+    JOIN   segments s ON se.segment_id = s.segment_id
+    JOIN   lectures l ON s.lecture_id  = l.lecture_id
+    WHERE  l.video_uri = :video_uri
+    ORDER  BY se.segment_id, similarity DESC
+) deduped
+ORDER  BY similarity DESC
+LIMIT  :k
+"""
+
+_SEARCH_SQL_TEXT_ONLY = """
+SELECT start_s, end_s, similarity
+FROM (
+    SELECT DISTINCT ON (se.segment_id)
+           s.start_s,
+           s.end_s,
+           1 - (se.embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings se
+    JOIN   segments s ON se.segment_id = s.segment_id
+    JOIN   lectures l ON s.lecture_id  = l.lecture_id
+    WHERE  l.video_uri = :video_uri
+      AND  se.is_frame_embedding = FALSE
+    ORDER  BY se.segment_id, similarity DESC
+) deduped
 ORDER  BY similarity DESC
 LIMIT  :k
 """
 
 
-def search_segments(video_uri: str, embedding: list, k: int) -> list:
+def search_segments(video_uri: str, embedding: list, k: int, include_frames: bool = True) -> list:
     """
     Return the top-k most similar segments for a video uri.
 
@@ -44,18 +72,25 @@ def search_segments(video_uri: str, embedding: list, k: int) -> list:
         Query vector produced by bedrock_utils.embed_text().
     k : int
         Number of results to return.
+    include_frames : bool
+        When True, both text and frame embeddings are searched and the
+        highest-scoring modality wins per segment.
+        When False (default), only text embeddings are searched.
 
     Returns
     -------
     list of {"start": float, "end": float} dicts, ordered by similarity.
+    Each segment appears at most once — the highest-scoring embedding modality
+    (text or frame) wins when both land in the candidate set.
     """
+    sql = _SEARCH_SQL_ALL if include_frames else _SEARCH_SQL_TEXT_ONLY
     vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
 
     resp = rds_data.execute_statement(
         resourceArn=CLUSTER_ARN,
         secretArn=SECRET_ARN,
         database=DB_NAME,
-        sql=_SEARCH_SQL,
+        sql=sql,
         includeResultMetadata=True,
         parameters=[
             {"name": "vec",       "value": {"stringValue": vec_str}},

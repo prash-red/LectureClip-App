@@ -3,8 +3,9 @@ import os
 
 from bedrock_utils import embed_text
 from aurora_utils import search_segments
+from constants import Model
 
-EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
 EMBEDDING_DIM      = int(os.environ.get("EMBEDDING_DIM", "1024"))
 BUCKET_NAME        = os.environ.get("BUCKET_NAME")
 
@@ -43,8 +44,9 @@ def handler(event, context):
     except (json.JSONDecodeError, TypeError):
         return _resp(400, {"error": "Request body must be valid JSON"})
 
-    video_id = body.get("videoId")
-    query    = body.get("query")
+    video_id       = body.get("videoId")
+    query          = body.get("query")
+    include_frames = bool(body.get("includeFrames", True))
 
     raw_k = body.get("k", 5)
     try:
@@ -64,8 +66,9 @@ def handler(event, context):
     # Reconstruct the full S3 URI to match lectures.video_uri in the DB.
     video_uri = f"s3://{BUCKET_NAME}/{video_id}"
 
-    vector   = embed_text(query, EMBEDDING_MODEL_ID, EMBEDDING_DIM)
-    segments = search_segments(video_uri, vector, k)
+    model_id = Model(EMBEDDING_MODEL_ID)
+    vector   = embed_text(query, model_id, EMBEDDING_DIM)
+    segments = search_segments(video_uri, vector, k, include_frames)
 
     print(f"Returning {len(segments)} segments for {video_uri!r}")
     return _resp(200, {"segments": segments})

@@ -6,7 +6,7 @@ from moto import mock_aws
 
 from conftest import TEST_USER_ID, load_lambda, make_event, parse_body, TEST_BUCKET
 
-PART_SIZE = 100 * 1024 * 1024       # 100 MB — must match the Lambda constant
+PART_SIZE = 10 * 1024 * 1024       # 10 MB — must match the Lambda constant
 PRESIGNED_URL_EXPIRY = 3600          # 1 hour — must match the Lambda constant
 
 VALID_BODY = {

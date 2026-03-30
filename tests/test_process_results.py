@@ -4,13 +4,14 @@ import importlib
 import io
 import json
 import uuid
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import requests
 from moto import mock_aws
 
 from conftest import load_lambda, load_module
+from constants import Model
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -318,8 +319,8 @@ class TestEmbedText:
         # different (possibly cheaper/lower-quality) embedding model in prod.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
-        assert fake.last_kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
+        assert fake.last_kwargs["modelId"] == Model.AMAZON_TITAN_EMBED_IMAGE.value
 
     def test_request_body_contains_dimensions(self):
         # The embedding dimension must be sent in the request body so Titan
@@ -328,9 +329,9 @@ class TestEmbedText:
         # pgvector column size and cause an Aurora type error at insert time.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 512)
         body = json.loads(fake.last_kwargs["body"])
-        assert body["dimensions"] == 512
+        assert body["embeddingConfig"]["outputEmbeddingLength"] == 512
 
     def test_request_body_contains_input_text(self):
         # The text to embed must be forwarded verbatim as "inputText".
@@ -338,7 +339,7 @@ class TestEmbedText:
         # meaning and degrade search quality without any error being raised.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("test sentence", "amazon.titan-embed-text-v2:0", 1024)
+            self.mod.embed_text("test sentence", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         body = json.loads(fake.last_kwargs["body"])
         assert body["inputText"] == "test sentence"
 
@@ -348,7 +349,7 @@ class TestEmbedText:
         # If the key name or response structure changes, this test catches it.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            result = self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
+            result = self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         assert result == FAKE_EMBEDDING
 
 
@@ -363,7 +364,7 @@ class TestGenerateTextEmbeddings:
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
             return self.mod.generate_text_embeddings(
-                segments, MEDIA_URI, "amazon.titan-embed-text-v2:0", 1024
+                segments, MEDIA_URI, Model.AMAZON_TITAN_EMBED_IMAGE, 1024
             )
 
     def test_one_record_per_segment(self):
@@ -435,6 +436,7 @@ class TestGenerateTextEmbeddings:
 class TestAuroraUtils:
     def setup_method(self, method):
         self.mod = load_module("process-results", "aurora_utils")
+        self.mod.rds_data.batch_execute_statement = MagicMock(return_value={"updateResults": []})
 
     def _prime_rds(self, records, column_metadata):
         """Queue a result set for the next moto execute_statement call."""
@@ -519,7 +521,42 @@ class TestAuroraUtils:
         ]
         embeddings = [{"embedding": FAKE_EMBEDDING}, {"embedding": FAKE_EMBEDDING}]
         # moto execute_statement is a no-op for INSERTs — just verify no exception
-        self.mod.insert_embeddings(seg_records, embeddings, "amazon.titan-embed-text-v2:0")
+        self.mod.insert_embeddings(seg_records, embeddings, Model.AMAZON_TITAN_EMBED_IMAGE)
+
+    # -- insert_frame_embeddings ----------------------------------------------
+
+    def test_insert_frame_embeddings_runs_without_error(self):
+        # Smoke test: the container JSON is correctly unpacked and forwarded
+        # to the RDS Data API without a serialization or parameter error.
+        seg_records = [
+            ("seg-id-1", 0.0, 30.0, "Hello."),
+            ("seg-id-2", 30.0, 60.0, "World."),
+        ]
+        frame_emb_data = [
+            {"idx": 0, "start_s": 0.0,  "end_s": 30.0, "speaker": "spk_0", "embedding": FAKE_EMBEDDING},
+            {"idx": 1, "start_s": 30.0, "end_s": 60.0, "speaker": "spk_1", "embedding": FAKE_EMBEDDING},
+        ]
+        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, Model.AMAZON_TITAN_EMBED_IMAGE)
+
+    def test_insert_frame_embeddings_skips_unknown_idx(self):
+        # An idx in the container JSON that has no matching segment record
+        # (e.g. the container processed a stale transcript with more segments)
+        # must be silently skipped rather than raising a KeyError.
+        seg_records = [("seg-id-1", 0.0, 30.0, "Hello.")]
+        frame_emb_data = [
+            {"idx": 0,  "start_s": 0.0,  "end_s": 30.0, "embedding": FAKE_EMBEDDING},
+            {"idx": 99, "start_s": 99.0, "end_s": 129.0, "embedding": FAKE_EMBEDDING},  # no match
+        ]
+        # Should not raise; the idx-99 entry is silently dropped.
+        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, Model.AMAZON_TITAN_EMBED_IMAGE)
+
+    def test_insert_frame_embeddings_empty_data_is_noop(self):
+        # An empty frame_emb_data list (e.g. container extracted no frames)
+        # must not trigger any RDS call — batch_execute_statement should not
+        # be invoked with an empty parameter set.
+        self.mod.rds_data.batch_execute_statement.reset_mock()
+        self.mod.insert_frame_embeddings([], [], Model.AMAZON_TITAN_EMBED_IMAGE)
+        self.mod.rds_data.batch_execute_statement.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +572,8 @@ class TestHandler:
 
         load_module("process-results", "transcript_utils")
         load_module("process-results", "bedrock_utils")
-        load_module("process-results", "aurora_utils")
+        aurora_utils = load_module("process-results", "aurora_utils")
+        aurora_utils.rds_data.batch_execute_statement = MagicMock(return_value={"updateResults": []})
 
         self.mod = load_lambda("process-results")
 
@@ -567,11 +605,11 @@ class TestHandler:
         result = self._run()
         assert result["embeddingCount"] == result["segmentCount"]
 
-    def test_raises_without_transcript_url(self):
-        # transcriptUrl is the only required field — without it there is
-        # nothing to process.  Raising ValueError (rather than returning a
-        # 200 with 0 segments) causes Step Functions to mark the execution
-        # as FAILED, making the missing URL visible in the workflow history.
+    def test_raises_without_transcript_url_and_no_container_key(self):
+        # transcriptUrl is required when the container key is absent — without
+        # either there is nothing to process.  Raising ValueError causes Step
+        # Functions to mark the execution as FAILED, surfacing the issue in
+        # the workflow history.
         import pytest
         with pytest.raises(ValueError, match="transcriptUrl"):
             self.mod.handler({"mediaUrl": MEDIA_URI}, {})
@@ -588,4 +626,66 @@ class TestHandler:
         # using this fallback key.  Tests the `or event.get("s3_uri")` branch
         # in index.py.
         result = self._run({"transcriptUrl": TRANSCRIPT_URL, "s3_uri": MEDIA_URI})
+        assert result["statusCode"] == 200
+
+    def test_frame_embedding_count_zero_when_key_absent(self):
+        # When frameEmbeddingsKey is not in the event (container branch did
+        # not run), frameEmbeddingCount must be 0 and no S3 call is made.
+        # Validates the optional / graceful-degradation path.
+        result = self._run()
+        assert result.get("frameEmbeddingCount") == 0
+
+    def test_frame_embeddings_inserted_when_key_present(self):
+        # When the event contains bucket + frameEmbeddingsKey the handler must
+        # read segments and frame embeddings from the container S3 JSON and
+        # skip the transcript fetch entirely.
+        # Validates the full container → Lambda handoff path.
+        import boto3
+        s3 = boto3.client("s3", region_name="us-east-1")
+        frame_bucket = "test-frames-bucket"
+        frame_key = "prefix/lecture.mp4/segment_frame_embeddings.json"
+        s3.create_bucket(Bucket=frame_bucket)
+        container_data = {
+            "segments": [
+                {"start_s": 0, "speaker": "spk_0", "text": "Hello world."},
+            ],
+            "frame_embeddings": [
+                {"idx": 0, "start_s": 0.0, "end_s": 1.0, "speaker": "spk_0", "embedding": FAKE_EMBEDDING},
+            ],
+        }
+        s3.put_object(
+            Bucket=frame_bucket,
+            Key=frame_key,
+            Body=json.dumps(container_data).encode(),
+        )
+        event = {
+            # transcriptUrl intentionally absent — segments come from the container
+            "mediaUrl":           MEDIA_URI,
+            "bucket":             frame_bucket,
+            "frameEmbeddingsKey": frame_key,
+        }
+        result = self._run(event)
+        assert result["statusCode"] == 200
+        assert result["frameEmbeddingCount"] == 1
+
+    def test_transcript_skipped_when_container_key_present(self):
+        # When the container key is present, transcriptUrl must be optional —
+        # the handler uses segments from the S3 JSON instead.  A missing
+        # transcriptUrl with a container key must NOT raise ValueError.
+        import boto3
+        s3 = boto3.client("s3", region_name="us-east-1")
+        frame_bucket = "test-frames-bucket-2"
+        frame_key = "prefix/lecture.mp4/segment_frame_embeddings.json"
+        s3.create_bucket(Bucket=frame_bucket)
+        container_data = {
+            "segments": [{"start_s": 0, "speaker": "spk_0", "text": "Hello."}],
+            "frame_embeddings": [],
+        }
+        s3.put_object(
+            Bucket=frame_bucket,
+            Key=frame_key,
+            Body=json.dumps(container_data).encode(),
+        )
+        event = {"mediaUrl": MEDIA_URI, "bucket": frame_bucket, "frameEmbeddingsKey": frame_key}
+        result = self._run(event)
         assert result["statusCode"] == 200

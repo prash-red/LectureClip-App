@@ -15,7 +15,7 @@ Parameters:
   Environment:
     Type: String
     Default: dev
-    AllowedValues: [dev, prod]
+    AllowedValues: [dev, eval, prod]
     Description: Deployment environment — controls the lectureclip-{env}-* function name prefix
 
   BucketName:
@@ -32,6 +32,30 @@ Parameters:
     Type: String
     Default: lectureclip-transcriptions-local
     Description: DynamoDB table name for transcription job tracking
+
+  EmbeddingModelId:
+    Type: String
+    Default: "global.cohere.embed-v4:0"
+    AllowedValues:
+      - "amazon.titan-embed-image-v1"
+      - "global.cohere.embed-v4:0"
+      - "modal-jina-clip-v2"
+    Description: Embedding model — Bedrock Titan, Bedrock Cohere, or self-hosted Modal jina-clip-v2
+
+  ModalEmbeddingUrl:
+    Type: String
+    Default: ""
+    Description: Modal web endpoint URL (required when EmbeddingModelId=modal-jina-clip-v2)
+
+  ChatModelId:
+    Type: String
+    Default: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    Description: Bedrock model ID for the chat lambda (any Claude model via Converse API)
+
+  ChatSessionsTable:
+    Type: String
+    Default: ""
+    Description: DynamoDB table name for conversation history (optional — stateless if empty)
 
 Resources:
   VideoUploadFunction:
@@ -95,9 +119,12 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/process-results/
       Timeout: 900
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
-      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
-      # real Bedrock and Aurora — not suitable for sam local invoke.
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
   QuerySegmentsFunction:
     Type: AWS::Serverless::Function
@@ -106,9 +133,67 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/query-segments/
       Timeout: 30
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
-      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
-      # real Bedrock and Aurora — not suitable for sam local invoke.
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  QuerySegmentsInfoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-query-segments-info"
+      Handler: index.handler
+      CodeUri: src/lambdas/query-segments-info/
+      Timeout: 30
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-chat"
+      Handler: index.lambda_handler
+      CodeUri: src/lambdas/chat/
+      Timeout: 60
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          CHAT_MODEL_ID: !Ref ChatModelId
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
+          BUCKET_NAME: !Ref BucketName
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  RegisterUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-register-user"
+      Handler: index.handler
+      CodeUri: src/lambdas/register-user/
+      Timeout: 10
+      Environment:
+        Variables:
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  ListLecturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-list-lectures"
+      Handler: index.handler
+      CodeUri: src/lambdas/list-lectures/
+      Timeout: 15
+      Environment:
+        Variables:
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
   DbMigrateFunction:
     Type: AWS::Serverless::Function

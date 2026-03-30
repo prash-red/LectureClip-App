@@ -11,6 +11,23 @@ export type TranscriptSegment = {
 }
 
 export type Video = {
-  id: string
-  url: string
+  lectureId: string
+  videoId: string
+  title: string
+  ingestedAt: string
+  playbackUrl: string | null
+}
+
+export type ChatSegment = {
+  segmentId: number
+  start: number
+  end: number
+  text: string
+  similarity: number
+}
+
+export type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  segments?: ChatSegment[]
 }

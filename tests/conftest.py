@@ -42,6 +42,7 @@ _QUERY_SEGMENTS_DIR = os.path.join(
 if _QUERY_SEGMENTS_DIR not in sys.path:
     sys.path.insert(0, _QUERY_SEGMENTS_DIR)
 
+
 os.environ.setdefault("STATE_MACHINE_ARN", "arn:aws:states:us-east-1:123456789012:stateMachine:TestMachine")
 os.environ.setdefault("TRANSCRIBE_TABLE", "test-transcribe-table")
 os.environ.setdefault("TRANSCRIPTS_BUCKET", "test-transcripts-bucket")

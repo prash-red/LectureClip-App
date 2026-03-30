@@ -40,33 +40,37 @@ class _FakeBedrockRuntime:
 class TestEmbedText:
     def setup_method(self, method):
         import bedrock_utils
+        import constants
+        importlib.reload(constants)
         importlib.reload(bedrock_utils)
         self.mod = bedrock_utils
+        self.constants = constants
 
     def test_calls_invoke_model_with_correct_model_id(self):
         fake = _FakeBedrockRuntime()
+        model = self.constants.Model.AMAZON_TITAN_EMBED_IMAGE
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
-        assert fake.last_kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+            self.mod.embed_text("hello", model, 1024)
+        assert fake.last_kwargs["modelId"] == model.value
 
     def test_request_body_contains_input_text(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("lecture on neural nets", "amazon.titan-embed-text-v2:0", 1024)
+            self.mod.embed_text("lecture on neural nets", self.constants.Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         body = json.loads(fake.last_kwargs["body"])
         assert body["inputText"] == "lecture on neural nets"
 
     def test_request_body_contains_dimensions(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
+            self.mod.embed_text("hello", self.constants.Model.AMAZON_TITAN_EMBED_IMAGE, 512)
         body = json.loads(fake.last_kwargs["body"])
-        assert body["dimensions"] == 512
+        assert body["embeddingConfig"]["outputEmbeddingLength"] == 512
 
     def test_returns_embedding_vector(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            result = self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
+            result = self.mod.embed_text("hello", self.constants.Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         assert result == FAKE_EMBEDDING
 
 
@@ -212,7 +216,7 @@ class TestHandler:
         # Patch the name inside the handler module (imported via `from aurora_utils import`).
         calls = []
 
-        def _spy(lecture_id, embedding, k):
+        def _spy(lecture_id, embedding, k, include_frames):
             calls.append(k)
             return []
 
@@ -224,7 +228,7 @@ class TestHandler:
     def test_custom_k_is_forwarded(self):
         calls = []
 
-        def _spy(lecture_id, embedding, k):
+        def _spy(lecture_id, embedding, k, include_frames):
             calls.append(k)
             return []
 

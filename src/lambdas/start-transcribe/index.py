@@ -36,7 +36,7 @@ def handler(event, context):
 
     response = transcribe_client.start_transcription_job(
         TranscriptionJobName=job_name,
-        IdentifyLanguage=True,
+        LanguageCode="en-US",
         OutputBucketName=TRANSCRIPTS_BUCKET,
         OutputKey=output_key,
         Media={"MediaFileUri": s3_uri},

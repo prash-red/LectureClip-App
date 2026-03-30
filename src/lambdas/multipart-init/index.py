@@ -9,7 +9,7 @@ BUCKET_NAME = os.environ['BUCKET_NAME']
 REGION = os.environ['REGION']
 
 ALLOWED_TYPES = ['video/mp4', 'video/mov']
-PART_SIZE = 100 * 1024 * 1024  # 100 MB per part
+PART_SIZE = 10 * 1024 * 1024  # 10 MB per part
 PRESIGNED_URL_EXPIRY = 3600    # 1 hour (parts may take longer to upload)
 
 

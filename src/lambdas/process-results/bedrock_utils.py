@@ -1,34 +1,59 @@
-"""
-Text embedding generation via Amazon Bedrock (Titan Embed Text v2).
-
-Adapted from:
-github.com/build-on-aws/langchain-embeddings (03-audio-video-workflow)
-"""
-
 import json
+import os
+import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
+from constants import Model
 
-bedrock = boto3.client("bedrock-runtime")
+_RETRY_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 10})
+bedrock = boto3.client("bedrock-runtime", config=_RETRY_CONFIG)
 
+def create_titan_body(text, embedding_dim):
+    return json.dumps({
+        "inputText": text,
+        "embeddingConfig": {
+            "outputEmbeddingLength": embedding_dim,
+        }
+    })
+
+def create_cohere_body(text, embedding_dim):
+    return json.dumps({
+        "input_type": "search_document",
+        "text": text,
+        "output_dimension": embedding_dim,
+    })
+
+def embed_text_modal(text: str) -> list:
+    url = os.environ["MODAL_EMBEDDING_URL"]
+    payload = json.dumps({"type": "text", "data": text}).encode()
+    req = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())["embedding"]
 
 def embed_text(text, model_id, embedding_dim):
     """
-    Call Bedrock and return the embedding vector for *text*.
-
-    Uses the Titan Embed Text v2 request format:
-        { "inputText": "...", "dimensions": N, "normalize": true }
+    Return the embedding vector for *text* using the configured model.
     """
-    body = json.dumps({
-        "inputText": text,
-        "dimensions": embedding_dim,
-        "normalize": True,
-    })
+
+    if model_id == Model.MODAL_JINA_CLIP_V2:
+        return embed_text_modal(text)
+
+    if model_id == Model.AMAZON_TITAN_EMBED_IMAGE:
+        body = create_titan_body(text, embedding_dim)
+    elif model_id == Model.COHERE_EMBED_V4:
+        body = create_cohere_body(text, embedding_dim)
+    else:
+        raise ValueError(f"Invalid model ID: {model_id}")
+
     response = bedrock.invoke_model(
         body=body,
-        modelId=model_id,
+        modelId=model_id.value,
         accept="application/json",
         contentType="application/json",
     )
@@ -44,26 +69,26 @@ def generate_text_embeddings(segments, source_uri, model_id, embedding_dim):
     full list for logging and will persist it in a future iteration.
     """
     filename = source_uri.rsplit("/", 1)[-1] if source_uri else ""
-    results = []
-    append_result = results.append
-    embed = embed_text
-    new_id = uuid.uuid4
     created_at = datetime.now(timezone.utc).isoformat()
 
-    for start_second, speaker, text in segments:
-        vector = embed(text, model_id, embedding_dim)
-        append_result({
-            "id":           str(new_id()),
-            "embedding":    vector,
-            "text":         text,
+    def _embed(args):
+        idx, (start_second, speaker, text) = args
+        return idx, {
+            "id": str(uuid.uuid4()),
+            "embedding": embed_text(text, model_id, embedding_dim),
+            "text": text,
             "start_second": start_second,
-            "speaker":      speaker,
-            "source":       filename,
-            "source_uri":   source_uri,
-            "model_id":     model_id,
+            "speaker": speaker,
+            "source": filename,
+            "source_uri": source_uri,
+            "model_id": model_id.value,
             # All records belong to the same embedding batch, so one timestamp
             # avoids repeating datetime formatting work in the hot loop.
-            "created_at":   created_at,
-        })
+            "created_at": created_at,
+        }
 
+    results = [None] * len(segments)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        for idx, record in pool.map(_embed, enumerate(segments)):
+            results[idx] = record
     return results

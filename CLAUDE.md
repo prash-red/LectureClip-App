@@ -43,6 +43,18 @@ Triggered automatically when a video lands in S3, orchestrated by a Step Functio
    - `dynamodb_utils.py` — generic `update_item` helper with expression builder.
    - `step_function_utils.py` — `send_task_success` / `send_task_failure` wrappers.
 
+### Modal embedding service (`modal/`)
+
+Self-hosted alternative to Bedrock for multimodal embeddings. Deploys `jinaai/jina-clip-v2` on Modal (T4 GPU) as a web endpoint that returns 1024-dim embeddings for both images and text in a shared vector space, enabling cross-modal similarity search (text query → nearest video frames).
+
+Key file:
+- `modal/embedder.py` — Modal app: `Embedder` class with `@modal.fastapi_endpoint` at `/embed`
+
+Request format: `{ "type": "image"|"text", "data": "<base64 or string>" }`
+Response format: `{ "embedding": [<1024 floats>] }`
+
+Deploy: `modal deploy modal/embedder.py` — the printed endpoint URL becomes `MODAL_EMBEDDING_URL`.
+
 ### Other
 
 `upload_video.py` is a CLI client that calls the upload endpoints through API Gateway, automatically choosing direct vs. multipart based on whether the file exceeds 100 MB. It uses the `requests` library (see `requirements.txt`).
@@ -56,6 +68,15 @@ Triggered automatically when a video lands in S3, orchestrated by a Step Functio
 | `STATE_MACHINE_ARN` | `s3-trigger` |
 | `TRANSCRIBE_TABLE` | `start-transcribe`, `process-transcribe` |
 | `TRANSCRIPTS_BUCKET` | `start-transcribe` |
+| `EMBEDDING_MODEL_ID` | `process-results`, `query-segments`, `query-segments-info` |
+| `FRAME_EMBEDDING_MODEL_ID` | ECS container (`src/container/`) |
+| `EMBEDDING_DIM` | `process-results`, `query-segments`, `query-segments-info`, ECS container |
+| `MODAL_EMBEDDING_URL` | all embedding lambdas + ECS container (required when model is `modal-jina-clip-v2`) |
+
+**Embedding model values** (`EMBEDDING_MODEL_ID` / `FRAME_EMBEDDING_MODEL_ID`):
+- `amazon.titan-embed-image-v1` — Bedrock Titan (default)
+- `global.cohere.embed-v4:0` — Bedrock Cohere Embed v4
+- `modal-jina-clip-v2` — self-hosted jina-clip-v2 on Modal
 
 S3 key format: `{ISO-timestamp}/{userId}/{filename}`
 
@@ -139,4 +160,26 @@ Manual deployment:
 
 # Deploy to a specific region
 ./scripts/deploy.sh --env prod --region us-east-1
+
+# Deploy and switch embedding model to self-hosted Modal
+./scripts/deploy.sh --env dev \
+  --embedding-model-id modal-jina-clip-v2 \
+  --modal-embedding-url https://<workspace>--lectureclip-embeddings-embedder-embed.modal.run
+
+# Update embedding env vars only (no code redeploy needed)
+./scripts/deploy.sh --env dev \
+  --function process-results \
+  --embedding-model-id modal-jina-clip-v2 \
+  --modal-embedding-url https://...
 ```
+
+When `--embedding-model-id` or `--modal-embedding-url` is passed, the script also calls `aws lambda update-function-configuration` on `process-results`, `query-segments`, and `query-segments-info`, merging only those keys into the existing env vars (Terraform-managed `AURORA_*` vars are preserved).
+
+### Modal embedding service
+
+```bash
+# Deploy the Modal embedding service (one-time or after changes)
+modal deploy modal/embedder.py
+```
+
+Requires Modal CLI (`pip install modal`) and an authenticated workspace (`modal token new`).
