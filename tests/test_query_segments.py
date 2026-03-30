@@ -40,33 +40,36 @@ class _FakeBedrockRuntime:
 class TestEmbedText:
     def setup_method(self, method):
         import bedrock_utils
+        import constants
         importlib.reload(bedrock_utils)
+        importlib.reload(constants)
         self.mod = bedrock_utils
+        self.constants = constants
 
     def test_calls_invoke_model_with_correct_model_id(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
-        assert fake.last_kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
+        assert fake.last_kwargs["modelId"] == Model.AMAZON_TITAN_EMBED_IMAGE
 
     def test_request_body_contains_input_text(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("lecture on neural nets", "amazon.titan-embed-text-v2:0", 1024)
+            self.mod.embed_text("lecture on neural nets", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         body = json.loads(fake.last_kwargs["body"])
         assert body["inputText"] == "lecture on neural nets"
 
     def test_request_body_contains_dimensions(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 512)
         body = json.loads(fake.last_kwargs["body"])
         assert body["embeddingConfig"]["outputEmbeddingLength"] == 512
 
     def test_returns_embedding_vector(self):
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            result = self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
+            result = self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         assert result == FAKE_EMBEDDING
 
 

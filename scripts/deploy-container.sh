@@ -5,10 +5,11 @@
 # logs in to ECR, and pushes :latest + :<git-sha> tags.
 #
 # Usage:
-#   ./scripts/deploy-container.sh [--env <dev|prod>] [--region <region>]
+#   ./scripts/deploy-container.sh [--env <dev|eval|prod>] [--region <region>]
 #
 # Environments:
 #   dev   (default) — pushes to lectureclip-dev-segment-frame-extractor
+#   eval            — pushes to lectureclip-eval-segment-frame-extractor
 #   prod            — pushes to lectureclip-prod-segment-frame-extractor
 #
 # Prerequisites:
@@ -22,6 +23,7 @@
 # Examples:
 #   ./scripts/deploy-container.sh
 #   ./scripts/deploy-container.sh --env prod
+#   ./scripts/deploy-container.sh --env eval
 #   AWS_PROFILE=dev ./scripts/deploy-container.sh --env dev --region ca-central-1
 
 set -euo pipefail
@@ -38,7 +40,7 @@ step() { echo ""; echo "▸ $*"; }
 # ── defaults ──────────────────────────────────────────────────────────────────
 
 REGION="${AWS_DEFAULT_REGION:-${AWS_REGION:-ca-central-1}}"
-ENV="dev"
+ENV="dev"            # dev, eval, or prod
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
 
@@ -54,7 +56,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$ENV" == "dev" || "$ENV" == "prod" ]] || err "--env must be 'dev' or 'prod' (got '$ENV')"
+[[ "$ENV" == "dev" || "$ENV" == "eval" || "$ENV" == "prod" ]] || err "--env must be 'dev', 'eval', or 'prod' (got '$ENV')"
 
 # ── resolve account + repo ────────────────────────────────────────────────────
 

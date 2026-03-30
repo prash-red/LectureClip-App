@@ -318,8 +318,8 @@ class TestEmbedText:
         # different (possibly cheaper/lower-quality) embedding model in prod.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
-        assert fake.last_kwargs["modelId"] == "amazon.titan-embed-text-v2:0"
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
+        assert fake.last_kwargs["modelId"] == Model.AMAZON_TITAN_EMBED_IMAGE
 
     def test_request_body_contains_dimensions(self):
         # The embedding dimension must be sent in the request body so Titan
@@ -328,7 +328,7 @@ class TestEmbedText:
         # pgvector column size and cause an Aurora type error at insert time.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 512)
+            self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 512)
         body = json.loads(fake.last_kwargs["body"])
         assert body["embeddingConfig"]["outputEmbeddingLength"] == 512
 
@@ -338,7 +338,7 @@ class TestEmbedText:
         # meaning and degrade search quality without any error being raised.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            self.mod.embed_text("test sentence", "amazon.titan-embed-text-v2:0", 1024)
+            self.mod.embed_text("test sentence", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         body = json.loads(fake.last_kwargs["body"])
         assert body["inputText"] == "test sentence"
 
@@ -348,7 +348,7 @@ class TestEmbedText:
         # If the key name or response structure changes, this test catches it.
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
-            result = self.mod.embed_text("hello", "amazon.titan-embed-text-v2:0", 1024)
+            result = self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
         assert result == FAKE_EMBEDDING
 
 
@@ -363,7 +363,7 @@ class TestGenerateTextEmbeddings:
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
             return self.mod.generate_text_embeddings(
-                segments, MEDIA_URI, "amazon.titan-embed-text-v2:0", 1024
+                segments, MEDIA_URI, Model.AMAZON_TITAN_EMBED_IMAGE, 1024
             )
 
     def test_one_record_per_segment(self):
@@ -520,7 +520,7 @@ class TestAuroraUtils:
         ]
         embeddings = [{"embedding": FAKE_EMBEDDING}, {"embedding": FAKE_EMBEDDING}]
         # moto execute_statement is a no-op for INSERTs — just verify no exception
-        self.mod.insert_embeddings(seg_records, embeddings, "amazon.titan-embed-text-v2:0")
+        self.mod.insert_embeddings(seg_records, embeddings, Model.AMAZON_TITAN_EMBED_IMAGE)
 
     # -- insert_frame_embeddings ----------------------------------------------
 
@@ -535,7 +535,7 @@ class TestAuroraUtils:
             {"idx": 0, "start_s": 0.0,  "end_s": 30.0, "speaker": "spk_0", "embedding": FAKE_EMBEDDING},
             {"idx": 1, "start_s": 30.0, "end_s": 60.0, "speaker": "spk_1", "embedding": FAKE_EMBEDDING},
         ]
-        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, "amazon.titan-embed-image-v1")
+        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, Model.AMAZON_TITAN_EMBED_IMAGE)
 
     def test_insert_frame_embeddings_skips_unknown_idx(self):
         # An idx in the container JSON that has no matching segment record
@@ -547,14 +547,14 @@ class TestAuroraUtils:
             {"idx": 99, "start_s": 99.0, "end_s": 129.0, "embedding": FAKE_EMBEDDING},  # no match
         ]
         # Should not raise; the idx-99 entry is silently dropped.
-        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, "amazon.titan-embed-image-v1")
+        self.mod.insert_frame_embeddings(seg_records, frame_emb_data, Model.AMAZON_TITAN_EMBED_IMAGE)
 
     def test_insert_frame_embeddings_empty_data_is_noop(self):
         # An empty frame_emb_data list (e.g. container extracted no frames)
         # must not trigger any RDS call — batch_execute_statement should not
         # be invoked with an empty parameter set.
         self.mod.rds_data.batch_execute_statement.reset_mock()
-        self.mod.insert_frame_embeddings([], [], "amazon.titan-embed-image-v1")
+        self.mod.insert_frame_embeddings([], [], Model.AMAZON_TITAN_EMBED_IMAGE)
         self.mod.rds_data.batch_execute_statement.assert_not_called()
 
 

@@ -15,7 +15,7 @@ Parameters:
   Environment:
     Type: String
     Default: dev
-    AllowedValues: [dev, prod]
+    AllowedValues: [dev, eval, prod]
     Description: Deployment environment — controls the lectureclip-{env}-* function name prefix
 
   BucketName:

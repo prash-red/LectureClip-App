@@ -1,0 +1,6 @@
+from enum import Enum
+
+
+class Model(Enum):
+    AMAZON_TITAN_EMBED_IMAGE = "amazon.titan-embed-image-v1"
+    COHERE_EMBED_V4 = "cohere.embed-v4:0"

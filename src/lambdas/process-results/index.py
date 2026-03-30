@@ -3,6 +3,7 @@ import os
 
 import boto3
 
+from constants import Model
 from transcript_utils import fetch_and_parse_transcript
 from bedrock_utils import generate_text_embeddings
 from aurora_utils import upsert_lecture, insert_segments, insert_embeddings, insert_frame_embeddings
@@ -54,10 +55,11 @@ def handler(event, context):
         frame_emb_data = []
         print(f"Parsed {len(segments)} speaker segments from transcript")
 
+    model_id = Model(EMBEDDING_MODEL_ID)
     embeddings = generate_text_embeddings(
         segments,
         source_uri=media_uri,
-        model_id=EMBEDDING_MODEL_ID,
+        model_id=model_id,
         embedding_dim=EMBEDDING_DIM,
     )
     print(f"Generated {len(embeddings)} embeddings")

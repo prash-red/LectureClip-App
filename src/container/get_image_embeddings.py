@@ -1,24 +1,39 @@
 import base64
 import json
-import os
 
 import boto3
+from constants import Model
 
 bedrock = boto3.client("bedrock-runtime")
 
-IMAGE_MODEL_ID = os.environ.get("FRAME_EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
-EMBEDDING_DIM  = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
-
-def embed_image(image_bytes: bytes, model_id: str = IMAGE_MODEL_ID, embedding_dim: int = EMBEDDING_DIM) -> list:
-    """Return a 1024-dim embedding vector for the given JPEG/PNG bytes."""
-    body = json.dumps({
+def create_titan_body(image_bytes, embedding_dim):
+    return json.dumps({
         "inputImage": base64.b64encode(image_bytes).decode("utf-8"),
         "embeddingConfig": {"outputEmbeddingLength": embedding_dim},
     })
+
+def create_cohere_body(image_bytes, embedding_dim):
+    return json.dumps({
+        "input_type": "search_document",
+        "images": [base64.b64encode(image_bytes).decode("utf-8")],
+        "output_dimension": embedding_dim,
+    })
+
+
+def embed_image(image_bytes: bytes, model_id: Model, embedding_dim: int) -> list:
+    """Return a 1024-dim embedding vector for the given JPEG/PNG bytes."""
+
+    if model_id == Model.AMAZON_TITAN_EMBED_IMAGE:
+        body = create_titan_body(image_bytes, embedding_dim)
+    elif model_id == Model.COHERE_EMBED_V4:
+        body = create_cohere_body(image_bytes, embedding_dim)
+    else:
+        raise ValueError("Invalid model ID")
+
     response = bedrock.invoke_model(
         body=body,
-        modelId=model_id,
+        modelId=model_id.value,
         accept="application/json",
         contentType="application/json",
     )

@@ -27,6 +27,7 @@ segment boundaries.
 import os
 import sys
 
+from constants import Model
 from get_image_embeddings import embed_image
 from step_function_utils import send_task_failure, send_task_success
 from transcript_utils import fetch_transcript_from_s3_uri, parse_transcript
@@ -35,6 +36,8 @@ from video_processor import extract_frame_at_time, ffmpeg_check
 
 TMP = "/tmp"
 
+IMAGE_MODEL_ID = os.environ.get("FRAME_EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
+EMBEDDING_DIM  = int(os.environ.get("EMBEDDING_DIM", "1024"))
 
 if __name__ == "__main__":
     s3_uri           = os.environ["S3_URI"]
@@ -79,7 +82,8 @@ if __name__ == "__main__":
                 image_bytes = fh.read()
             os.remove(frame_path)
 
-            embedding = embed_image(image_bytes)
+            model_id = Model(IMAGE_MODEL_ID)
+            embedding = embed_image(image_bytes, model_id, EMBEDDING_DIM)
             frame_embeddings.append({
                 "idx":       idx,
                 "start_s":   float(start_s),

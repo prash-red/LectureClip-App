@@ -3,6 +3,7 @@ import os
 
 from bedrock_utils import embed_text
 from aurora_utils import search_segments
+from constants import Model
 
 EMBEDDING_MODEL_ID = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
 EMBEDDING_DIM      = int(os.environ.get("EMBEDDING_DIM", "1024"))
@@ -64,7 +65,8 @@ def handler(event, context):
     # Reconstruct the full S3 URI to match lectures.video_uri in the DB.
     video_uri = f"s3://{BUCKET_NAME}/{video_id}"
 
-    vector   = embed_text(query, EMBEDDING_MODEL_ID, EMBEDDING_DIM)
+    model_id = Model(EMBEDDING_MODEL_ID)
+    vector   = embed_text(query, model_id, EMBEDDING_DIM)
     segments = search_segments(video_uri, vector, k)
 
     print(f"Returning {len(segments)} segments for {video_uri!r}")

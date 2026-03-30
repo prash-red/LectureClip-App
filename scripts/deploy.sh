@@ -8,10 +8,11 @@
 # synchronously to apply any pending schema changes to Aurora.
 #
 # Usage:
-#   ./scripts/deploy.sh [--env <dev|prod>] [--function <name>] [--region <region>]
+#   ./scripts/deploy.sh [--env <dev|eval|prod>] [--function <name>] [--region <region>]
 #
 # Environments:
 #   dev   (default) — targets lectureclip-dev-* Lambda functions
+#   eval            — targets lectureclip-eval-* Lambda functions
 #   prod            — targets lectureclip-prod-* Lambda functions
 #
 # Functions:
@@ -34,6 +35,7 @@
 # Examples:
 #   ./scripts/deploy.sh
 #   ./scripts/deploy.sh --env prod
+#   ./scripts/deploy.sh --env eval --function query-segments
 #   ./scripts/deploy.sh --env dev --function video-upload
 #   AWS_PROFILE=prod ./scripts/deploy.sh --env prod --function s3-trigger
 
@@ -51,7 +53,7 @@ step() { echo ""; echo "▸ $*"; }
 # ── defaults ──────────────────────────────────────────────────────────────────
 
 REGION="${AWS_DEFAULT_REGION:-${AWS_REGION:-ca-central-1}}"
-ENV="dev"            # dev or prod
+ENV="dev"            # dev, eval, or prod
 FILTER_FUNCTION=""   # empty = deploy all
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
@@ -69,7 +71,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$ENV" == "dev" || "$ENV" == "prod" ]] || err "--env must be 'dev' or 'prod' (got '$ENV')"
+[[ "$ENV" == "dev" || "$ENV" == "eval" || "$ENV" == "prod" ]] || err "--env must be 'dev', 'eval', or 'prod' (got '$ENV')"
 
 # ── function registry ─────────────────────────────────────────────────────────
 # Format: "short-name|SAM-logical-id"
