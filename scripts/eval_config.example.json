@@ -1,0 +1,18 @@
+{
+  "state_file": "eval_state.json",
+  "k": 5,
+  "environments": [
+    {
+      "label": "Titan (dev)",
+      "api_url": "https://<dev-api-id>.execute-api.ca-central-1.amazonaws.com/dev"
+    },
+    {
+      "label": "jina-clip-v2 (eval)",
+      "api_url": "https://<eval-api-id>.execute-api.ca-central-1.amazonaws.com/eval"
+    }
+  ],
+  "queries": "queries.txt",
+  "ground_truth": {
+    "What is gradient descent?": ["<segment-id-1>", "<segment-id-2>"]
+  }
+}

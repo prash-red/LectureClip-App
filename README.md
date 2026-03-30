@@ -331,7 +331,6 @@ The embedding pipeline supports three interchangeable models, selected via `EMBE
 | Model ID | Provider | Modalities |
 |---|---|---|
 | `amazon.titan-embed-image-v1` | AWS Bedrock | image |
-| `global.cohere.embed-v4:0` | AWS Bedrock | image + text |
 | `modal-jina-clip-v2` | Self-hosted on Modal | image + text (shared space) |
 
 ### Self-hosted Modal embedding service
