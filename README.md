@@ -5,6 +5,10 @@ Serverless AWS backend for uploading lecture videos directly to S3 and transcrib
 ![Frontend coverage](.github/badges/frontend-coverage.svg)
 ![Backend coverage](.github/badges/backend-coverage.svg)
 
+## Deployed App
+
+- **Production:** [LectureClip Web App](https://main.d11m2wl9n5ky48.amplifyapp.com)
+
 ## Architecture
 
 ### Video Upload
