@@ -6,9 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from constants import Model
 
-bedrock = boto3.client("bedrock-runtime")
+_RETRY_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 10})
+bedrock = boto3.client("bedrock-runtime", config=_RETRY_CONFIG)
 
 def create_titan_body(text, embedding_dim):
     return json.dumps({
@@ -86,7 +88,7 @@ def generate_text_embeddings(segments, source_uri, model_id, embedding_dim):
         }
 
     results = [None] * len(segments)
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         for idx, record in pool.map(_embed, enumerate(segments)):
             results[idx] = record
     return results

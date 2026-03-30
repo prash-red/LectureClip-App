@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { VideoPlayer } from '@/components/VideoPlayer.tsx'
 import type { VideoPlayerHandle } from '@/components/VideoPlayer.tsx'
-import { getTranscript, queryVideo } from '@/lib/api.ts'
-import type { Segment, TranscriptSegment, Video } from '@/lib/types.ts'
+import { chatVideo, getTranscript, queryVideo } from '@/lib/api.ts'
+import type { ChatMessage, ChatSegment, Segment, TranscriptSegment, Video } from '@/lib/types.ts'
 
 type PlayerPageProps = {
   videoId: string
@@ -44,6 +45,12 @@ export function PlayerPage({
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([])
   const [isTranscriptLoading, setIsTranscriptLoading] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [isChatLoading, setIsChatLoading] = useState(false)
+  const [chatSessionId, setChatSessionId] = useState<string | undefined>(undefined)
+  const chatEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const url = URL.createObjectURL(file)
@@ -108,6 +115,42 @@ export function PlayerPage({
   function handleBackToUpload() {
     videoPlayerRef.current?.pause()
     onBackToUpload()
+  }
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
+
+  async function handleChatSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const text = chatInput.trim()
+    if (!text || isChatLoading) return
+
+    const userMessage: ChatMessage = { role: 'user', content: text }
+    setChatMessages((prev) => [...prev, userMessage])
+    setChatInput('')
+    setIsChatLoading(true)
+
+    try {
+      const { answer, sessionId, segments } = await chatVideo(videoId, text, chatSessionId)
+      setChatSessionId(sessionId)
+      const assistantMessage: ChatMessage = { role: 'assistant', content: answer, segments }
+      setChatMessages((prev) => [...prev, assistantMessage])
+    } catch {
+      const errorMessage: ChatMessage = {
+        role: 'assistant',
+        content: 'Sorry, something went wrong. Please try again.',
+      }
+      setChatMessages((prev) => [...prev, errorMessage])
+    } finally {
+      setIsChatLoading(false)
+    }
+  }
+
+  function preprocessChatContent(content: string): string {
+    // Convert [Segment N] references into markdown links so ReactMarkdown
+    // can render them as clickable buttons via the custom `a` component.
+    return content.replace(/\[Segment (\d+)\]/g, '[Segment $1](#segment-$1)')
   }
 
   return (
@@ -189,6 +232,95 @@ export function PlayerPage({
           )}
         </aside>
       </div>
+
+      <section className="chat-panel" aria-label="Chat with lecture">
+        <div className="chat-panel-header">
+          <h3>Chat with this lecture</h3>
+          <p>Ask questions and get answers grounded in the video content.</p>
+        </div>
+
+        <div className="chat-messages" role="log" aria-live="polite">
+          {chatMessages.length === 0 && (
+            <p className="chat-empty">No messages yet. Ask a question below.</p>
+          )}
+          {chatMessages.map((msg, i) => (
+            <div key={i} className={`chat-message chat-message--${msg.role}`}>
+              <div className="chat-bubble">
+                {msg.role === 'user' ? (
+                  <p>{msg.content}</p>
+                ) : (
+                  <div className="chat-markdown">
+                    <ReactMarkdown
+                      components={{
+                        a({ href, children }) {
+                          const match = href?.match(/^#segment-(\d+)$/)
+                          if (match && msg.segments) {
+                            const seg = msg.segments[parseInt(match[1], 10) - 1] as ChatSegment | undefined
+                            return (
+                              <button
+                                type="button"
+                                className="chat-segment-ref"
+                                onClick={() => seg && videoPlayerRef.current?.seekTo(seg.start)}
+                              >
+                                {children}
+                              </button>
+                            )
+                          }
+                          return <a href={href}>{children}</a>
+                        },
+                      }}
+                    >
+                      {preprocessChatContent(msg.content)}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                {msg.role === 'assistant' && msg.segments && msg.segments.length > 0 && (
+                  <div className="chat-cited-segments">
+                    {msg.segments.map((seg, j) => (
+                      <button
+                        key={j}
+                        type="button"
+                        className="chat-segment-chip"
+                        onClick={() => videoPlayerRef.current?.seekTo(seg.start)}
+                      >
+                        Segment {j + 1} &nbsp; {formatTime(seg.start)} – {formatTime(seg.end)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {isChatLoading && (
+            <div className="chat-message chat-message--assistant">
+              <div className="chat-bubble chat-bubble--loading">
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        <form className="chat-input-form" onSubmit={handleChatSubmit}>
+          <input
+            className="chat-input"
+            type="text"
+            placeholder="Ask about this lecture..."
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            disabled={isChatLoading}
+          />
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={!chatInput.trim() || isChatLoading}
+          >
+            Send
+          </button>
+        </form>
+      </section>
     </section>
   )
 }

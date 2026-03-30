@@ -4,9 +4,13 @@ import os
 
 import boto3
 import requests
+from botocore.config import Config
 from constants import Model
 
-bedrock = boto3.client("bedrock-runtime")
+# adaptive mode automatically slows request rate when Bedrock returns throttling
+# errors; max_attempts=10 gives more room than the default 4 before giving up.
+_RETRY_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 10})
+bedrock = boto3.client("bedrock-runtime", config=_RETRY_CONFIG)
 
 
 def create_titan_body(image_bytes, embedding_dim):

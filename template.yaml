@@ -47,6 +47,16 @@ Parameters:
     Default: ""
     Description: Modal web endpoint URL (required when EmbeddingModelId=modal-jina-clip-v2)
 
+  ChatModelId:
+    Type: String
+    Default: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    Description: Bedrock model ID for the chat lambda (any Claude model via Converse API)
+
+  ChatSessionsTable:
+    Type: String
+    Default: ""
+    Description: DynamoDB table name for conversation history (optional — stateless if empty)
+
 Resources:
   VideoUploadFunction:
     Type: AWS::Serverless::Function
@@ -141,6 +151,23 @@ Resources:
         Variables:
           EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
           MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
+
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "lectureclip-${Environment}-chat"
+      Handler: index.lambda_handler
+      CodeUri: src/lambdas/chat/
+      Timeout: 60
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          CHAT_MODEL_ID: !Ref ChatModelId
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
+          BUCKET_NAME: !Ref BucketName
           # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
           # are injected by Terraform (requires real Aurora — not for sam local invoke)
 

@@ -1,4 +1,4 @@
-import type { Segment, TranscriptSegment } from '@/lib/types.ts'
+import type { ChatSegment, Segment, TranscriptSegment } from '@/lib/types.ts'
 
 // Set via a build-time env variable (Vite exposes VITE_* vars to the bundle).
 // Example .env.local:  VITE_API_BASE_URL=https://abc123.execute-api.ca-central-1.amazonaws.com/dev
@@ -184,6 +184,22 @@ export async function queryVideo(
     throw new Error(`Query failed: ${res.status}`)
   }
   return res.json() as Promise<{ segments: Segment[] }>
+}
+
+export async function chatVideo(
+  videoId: string,
+  query: string,
+  sessionId?: string,
+): Promise<{ answer: string; sessionId: string; segments: ChatSegment[] }> {
+  const res = await fetch(`${API_BASE}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId, query, sessionId, k: 5 }),
+  })
+  if (!res.ok) {
+    throw new Error(`Chat failed: ${res.status}`)
+  }
+  return res.json() as Promise<{ answer: string; sessionId: string; segments: ChatSegment[] }>
 }
 
 export async function getTranscript(videoId: string): Promise<{ transcript: TranscriptSegment[] }> {

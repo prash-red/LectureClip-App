@@ -26,6 +26,7 @@ segment boundaries.
 
 import os
 import sys
+import time
 
 from constants import Model
 from get_image_embeddings import embed_image
@@ -84,6 +85,12 @@ if __name__ == "__main__":
 
             model_id = Model(IMAGE_MODEL_ID)
             embedding = embed_image(image_bytes, model_id, EMBEDDING_DIM)
+
+            # Pace Bedrock calls to stay under the TPS quota for long videos.
+            # Modal has no quota so skip the delay for that model.
+            if model_id != Model.MODAL_JINA_CLIP_V2:
+                time.sleep(0.5)
+
             frame_embeddings.append({
                 "idx":       idx,
                 "start_s":   float(start_s),

@@ -9,6 +9,7 @@ type VideoPlayerProps = {
 
 export type VideoPlayerHandle = {
   pause: () => void
+  seekTo: (time: number) => void
 }
 
 function formatTime(seconds: number) {
@@ -52,6 +53,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   useImperativeHandle(ref, () => ({
     pause() {
       videoRef.current?.pause()
+    },
+    seekTo(time: number) {
+      const video = videoRef.current
+      if (!video) return
+      updatePlaybackMode('free')
+      programmaticSeekTargetRef.current = time
+      video.currentTime = time
+      void video.play()
     },
   }))
 

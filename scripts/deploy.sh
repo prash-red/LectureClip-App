@@ -93,6 +93,7 @@ ALL_FUNCTIONS=(
   "db-migrate|DbMigrateFunction"
   "query-segments|QuerySegmentsFunction"
   "query-segments-info|QuerySegmentsInfoFunction"
+  "chat|ChatFunction"
 )
 
 # ── filter to requested function ──────────────────────────────────────────────
@@ -105,7 +106,7 @@ for entry in "${ALL_FUNCTIONS[@]}"; do
   fi
 done
 
-[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments | query-segments-info"
+[[ ${#FUNCTIONS_TO_DEPLOY[@]} -eq 0 ]] && err "unknown function '$FILTER_FUNCTION'. Choose: video-upload | multipart-init | multipart-complete | s3-trigger | start-transcribe | process-transcribe | process-results | db-migrate | query-segments | query-segments-info | chat"
 
 # ── summary ───────────────────────────────────────────────────────────────────
 
@@ -171,7 +172,7 @@ done
 # Merges the new values into each lambda's existing env vars (preserving the
 # Terraform-managed AURORA_* vars) via update-function-configuration.
 
-EMBEDDING_LAMBDAS=("process-results" "query-segments" "query-segments-info")
+EMBEDDING_LAMBDAS=("process-results" "query-segments" "query-segments-info" "chat")
 
 update_embedding_env() {
   local short_name="$1"
