@@ -25,11 +25,53 @@ rds_data = boto3.client("rds-data")
 # top-k results (which happens when text and frames share the same model).
 # The inner ORDER BY picks the highest-scoring modality for each segment;
 # the outer query re-sorts the deduplicated rows before applying LIMIT.
+# _SEARCH_SQL_ALL = """
+# SELECT segment_id, start_s, end_s, idx, text, similarity
+# FROM (
+#     SELECT DISTINCT ON (se.segment_id)
+#            s.segment_id,
+#            s.start_s,
+#            s.end_s,
+#            s.idx,
+#            s.text,
+#            1 - (se.embedding <=> :vec::vector) AS similarity
+#     FROM   segment_embeddings se
+#     JOIN   segments s ON se.segment_id = s.segment_id
+#     JOIN   lectures l ON s.lecture_id  = l.lecture_id
+#     WHERE  l.video_uri = :video_uri
+#     ORDER  BY se.segment_id, similarity DESC
+# ) deduped
+# ORDER  BY similarity DESC
+# LIMIT  :k
+# """
+#
+# _SEARCH_SQL_TEXT_ONLY = """
+# SELECT segment_id, start_s, end_s, idx, text, similarity
+# FROM (
+#     SELECT DISTINCT ON (se.segment_id)
+#            s.segment_id,
+#            s.start_s,
+#            s.end_s,
+#            s.idx,
+#            s.text,
+#            1 - (se.embedding <=> :vec::vector) AS similarity
+#     FROM   segment_embeddings se
+#     JOIN   segments s ON se.segment_id = s.segment_id
+#     JOIN   lectures l ON s.lecture_id  = l.lecture_id
+#     WHERE  l.video_uri = :video_uri
+#       AND  se.is_frame_embedding = FALSE
+#     ORDER  BY se.segment_id, similarity DESC
+# ) deduped
+# ORDER  BY similarity DESC
+# LIMIT  :k
+# """
+
+# TODO revert this back after testing
+# removes duplication filtering for testing
 _SEARCH_SQL_ALL = """
 SELECT segment_id, start_s, end_s, idx, text, similarity
 FROM (
-    SELECT DISTINCT ON (se.segment_id)
-           s.segment_id,
+    SELECT s.segment_id,
            s.start_s,
            s.end_s,
            s.idx,
@@ -39,17 +81,15 @@ FROM (
     JOIN   segments s ON se.segment_id = s.segment_id
     JOIN   lectures l ON s.lecture_id  = l.lecture_id
     WHERE  l.video_uri = :video_uri
-    ORDER  BY se.segment_id, similarity DESC
-) deduped
-ORDER  BY similarity DESC
+    ORDER  BY similarity DESC
+) ranked
 LIMIT  :k
 """
 
 _SEARCH_SQL_TEXT_ONLY = """
 SELECT segment_id, start_s, end_s, idx, text, similarity
 FROM (
-    SELECT DISTINCT ON (se.segment_id)
-           s.segment_id,
+    SELECT s.segment_id,
            s.start_s,
            s.end_s,
            s.idx,
@@ -60,9 +100,8 @@ FROM (
     JOIN   lectures l ON s.lecture_id  = l.lecture_id
     WHERE  l.video_uri = :video_uri
       AND  se.is_frame_embedding = FALSE
-    ORDER  BY se.segment_id, similarity DESC
-) deduped
-ORDER  BY similarity DESC
+    ORDER  BY similarity DESC
+) ranked
 LIMIT  :k
 """
 
