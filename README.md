@@ -324,6 +324,41 @@ def test_something(mock_s3):
    LECTURECLIP_BUCKET=my-bucket ./scripts/invoke-local.sh my-new-function
    ```
 
+## Embedding Models
+
+The embedding pipeline supports three interchangeable models, selected via `EMBEDDING_MODEL_ID` (lambdas) and `FRAME_EMBEDDING_MODEL_ID` (ECS container):
+
+| Model ID | Provider | Modalities |
+|---|---|---|
+| `amazon.titan-embed-image-v1` | AWS Bedrock | image |
+| `global.cohere.embed-v4:0` | AWS Bedrock | image + text |
+| `modal-jina-clip-v2` | Self-hosted on Modal | image + text (shared space) |
+
+### Self-hosted Modal embedding service
+
+`modal/embedder.py` deploys `jinaai/jina-clip-v2` (1024-dim, T4 GPU) as a web endpoint. Text and image embeddings share a vector space, enabling cross-modal similarity search.
+
+```bash
+# Deploy (requires Modal CLI + authenticated workspace)
+modal deploy modal/embedder.py
+```
+
+The printed URL becomes `MODAL_EMBEDDING_URL`.
+
+### Switching models at deploy time
+
+```bash
+# Switch to Modal
+./scripts/deploy.sh --env dev \
+  --embedding-model-id modal-jina-clip-v2 \
+  --modal-embedding-url https://<workspace>--lectureclip-embeddings-embedder-embed.modal.run
+
+# Switch back to Bedrock Cohere
+./scripts/deploy.sh --env dev --embedding-model-id "global.cohere.embed-v4:0"
+```
+
+When either embedding flag is passed, the script updates `EMBEDDING_MODEL_ID` and `MODAL_EMBEDDING_URL` on `process-results`, `query-segments`, and `query-segments-info` via `update-function-configuration`, without overwriting other Terraform-managed env vars.
+
 ## Deployment
 ### Authenticate with SSO
 If using AWS SSO, run:
@@ -368,3 +403,4 @@ The deploy script:
 1. Runs `sam build --parameter-overrides Environment={env}` (installs any `requirements.txt` into the build artifact)
 2. Zips the build output
 3. Calls `aws lambda update-function-code --zip-file` directly to `lectureclip-{env}-{function}` and waits for the update to propagate
+4. If `--embedding-model-id` or `--modal-embedding-url` is passed, merges those values into the env vars of `process-results`, `query-segments`, and `query-segments-info` via `update-function-configuration`

@@ -33,6 +33,20 @@ Parameters:
     Default: lectureclip-transcriptions-local
     Description: DynamoDB table name for transcription job tracking
 
+  EmbeddingModelId:
+    Type: String
+    Default: "global.cohere.embed-v4:0"
+    AllowedValues:
+      - "amazon.titan-embed-image-v1"
+      - "global.cohere.embed-v4:0"
+      - "modal-jina-clip-v2"
+    Description: Embedding model — Bedrock Titan, Bedrock Cohere, or self-hosted Modal jina-clip-v2
+
+  ModalEmbeddingUrl:
+    Type: String
+    Default: ""
+    Description: Modal web endpoint URL (required when EmbeddingModelId=modal-jina-clip-v2)
+
 Resources:
   VideoUploadFunction:
     Type: AWS::Serverless::Function
@@ -95,9 +109,12 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/process-results/
       Timeout: 900
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
-      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
-      # real Bedrock and Aurora — not suitable for sam local invoke.
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
   QuerySegmentsFunction:
     Type: AWS::Serverless::Function
@@ -106,9 +123,12 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/query-segments/
       Timeout: 30
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
-      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
-      # real Bedrock and Aurora — not suitable for sam local invoke.
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
   QuerySegmentsInfoFunction:
     Type: AWS::Serverless::Function
@@ -117,9 +137,12 @@ Resources:
       Handler: index.handler
       CodeUri: src/lambdas/query-segments-info/
       Timeout: 30
-      # Env vars (AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME,
-      # EMBEDDING_MODEL_ID, EMBEDDING_DIM) are injected by Terraform; requires
-      # real Bedrock and Aurora — not suitable for sam local invoke.
+      Environment:
+        Variables:
+          EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          MODAL_EMBEDDING_URL: !Ref ModalEmbeddingUrl
+          # AURORA_CLUSTER_ARN, AURORA_SECRET_ARN, AURORA_DB_NAME, EMBEDDING_DIM
+          # are injected by Terraform (requires real Aurora — not for sam local invoke)
 
   DbMigrateFunction:
     Type: AWS::Serverless::Function
