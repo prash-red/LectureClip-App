@@ -10,7 +10,7 @@ EMBEDDING_DIM      = int(os.environ.get("EMBEDDING_DIM", "1024"))
 BUCKET_NAME        = os.environ.get("BUCKET_NAME")
 
 if not BUCKET_NAME or not BUCKET_NAME.strip():
-    raise RuntimeError("BUCKET_NAME environment variable is required for query-segments Lambda")
+    raise RuntimeError("BUCKET_NAME environment variable is required for query-segments-info Lambda")
 
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin":  "*",
@@ -21,15 +21,17 @@ _CORS_HEADERS = {
 
 def handler(event, context):
     """
-    Semantic search over lecture transcript segments.
+    Semantic search over lecture transcript segments, returning full segment info.
 
     Expected request body (JSON):
-        videoId  — videoID name (returned by the upload endpoint)
-        query    — natural language query string
-        k        — optional, number of results (default 5)
+        videoId       — videoID name (returned by the upload endpoint)
+        query         — natural language query string
+        k             — optional, number of results (default 5)
+        includeFrames — optional bool, include frame embeddings in search (default true)
 
     Returns:
-        { "segments": [{ "start": <float>, "end": <float> }, ...] }
+        { "segments": [{ "segmentId": <str>, "start": <float>, "end": <float>,
+                         "idx": <int>, "text": <str>, "similarity": <float> }, ...] }
 
     Segments are ordered by cosine similarity (most relevant first).
     """

@@ -1,8 +1,9 @@
 """
-Aurora PostgreSQL helpers for the query-segments Lambda.
+Aurora PostgreSQL helpers for the query-segments-info Lambda.
 
 Performs a pgvector cosine similarity search over segment_embeddings,
-joining back to segments to retrieve start/end timestamps.
+joining back to segments to retrieve start/end timestamps, segment id,
+index, and transcript text.
 """
 
 import os
@@ -25,11 +26,14 @@ rds_data = boto3.client("rds-data")
 # The inner ORDER BY picks the highest-scoring modality for each segment;
 # the outer query re-sorts the deduplicated rows before applying LIMIT.
 _SEARCH_SQL_ALL = """
-SELECT start_s, end_s, similarity
+SELECT segment_id, start_s, end_s, idx, text, similarity
 FROM (
     SELECT DISTINCT ON (se.segment_id)
+           s.segment_id,
            s.start_s,
            s.end_s,
+           s.idx,
+           s.text,
            1 - (se.embedding <=> :vec::vector) AS similarity
     FROM   segment_embeddings se
     JOIN   segments s ON se.segment_id = s.segment_id
@@ -42,11 +46,14 @@ LIMIT  :k
 """
 
 _SEARCH_SQL_TEXT_ONLY = """
-SELECT start_s, end_s, similarity
+SELECT segment_id, start_s, end_s, idx, text, similarity
 FROM (
     SELECT DISTINCT ON (se.segment_id)
+           s.segment_id,
            s.start_s,
            s.end_s,
+           s.idx,
+           s.text,
            1 - (se.embedding <=> :vec::vector) AS similarity
     FROM   segment_embeddings se
     JOIN   segments s ON se.segment_id = s.segment_id
@@ -79,7 +86,8 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
 
     Returns
     -------
-    list of {"start": float, "end": float} dicts, ordered by similarity.
+    list of dicts ordered by similarity, each containing:
+        segment_id, start, end, idx, text, similarity
     Each segment appears at most once — the highest-scoring embedding modality
     (text or frame) wins when both land in the candidate set.
     """
@@ -104,4 +112,14 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
         dict(zip(cols, [list(field.values())[0] for field in row]))
         for row in resp.get("records", [])
     ]
-    return [{"start": float(r["start_s"]), "end": float(r["end_s"])} for r in rows]
+    return [
+        {
+            "segmentId":  r["segment_id"],
+            "start":      float(r["start_s"]),
+            "end":        float(r["end_s"]),
+            "idx":        int(r["idx"]),
+            "text":       r["text"],
+            "similarity": float(r["similarity"]),
+        }
+        for r in rows
+    ]

@@ -108,11 +108,12 @@ DDL_STATEMENTS = [
     # 7. Segment embeddings — pgvector table for similarity search
     """
     CREATE TABLE IF NOT EXISTS segment_embeddings (
-        embedding_id UUID         PRIMARY KEY,
-        segment_id   UUID         NOT NULL REFERENCES segments(segment_id),
-        embedding    vector(1024) NOT NULL,
-        model_id     TEXT         NOT NULL DEFAULT 'amazon.titan-embed-text-v2:0',
-        created_ts   TIMESTAMPTZ  NOT NULL DEFAULT now()
+        embedding_id      UUID         PRIMARY KEY,
+        segment_id        UUID         NOT NULL REFERENCES segments(segment_id),
+        embedding         vector(1024) NOT NULL,
+        model_id          TEXT         NOT NULL DEFAULT 'amazon.titan-embed-text-v2:0',
+        is_frame_embedding BOOLEAN     NOT NULL DEFAULT false,
+        created_ts        TIMESTAMPTZ  NOT NULL DEFAULT now()
     )
     """,
 
@@ -121,6 +122,12 @@ DDL_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS segment_embeddings_hnsw_idx
         ON segment_embeddings
         USING hnsw (embedding vector_cosine_ops)
+    """,
+
+    # 8. Backfill is_frame_embedding for tables created before this column existed
+    """
+    ALTER TABLE segment_embeddings
+        ADD COLUMN IF NOT EXISTS is_frame_embedding BOOLEAN NOT NULL DEFAULT false
     """,
 ]
 

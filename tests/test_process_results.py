@@ -11,6 +11,7 @@ import requests
 from moto import mock_aws
 
 from conftest import load_lambda, load_module
+from constants import Model
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -319,7 +320,7 @@ class TestEmbedText:
         fake = _FakeBedrockRuntime()
         with patch.object(self.mod, "bedrock", fake):
             self.mod.embed_text("hello", Model.AMAZON_TITAN_EMBED_IMAGE, 1024)
-        assert fake.last_kwargs["modelId"] == Model.AMAZON_TITAN_EMBED_IMAGE
+        assert fake.last_kwargs["modelId"] == Model.AMAZON_TITAN_EMBED_IMAGE.value
 
     def test_request_body_contains_dimensions(self):
         # The embedding dimension must be sent in the request body so Titan

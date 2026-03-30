@@ -8,7 +8,7 @@ from transcript_utils import fetch_and_parse_transcript
 from bedrock_utils import generate_text_embeddings
 from aurora_utils import upsert_lecture, insert_segments, insert_embeddings, insert_frame_embeddings
 
-EMBEDDING_MODEL_ID       = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+EMBEDDING_MODEL_ID       = os.environ.get("EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
 EMBEDDING_DIM            = int(os.environ.get("EMBEDDING_DIM", "1024"))
 FRAME_EMBEDDING_MODEL_ID = os.environ.get("FRAME_EMBEDDING_MODEL_ID", "amazon.titan-embed-image-v1")
 

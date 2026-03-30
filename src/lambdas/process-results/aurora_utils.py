@@ -123,17 +123,18 @@ def insert_embeddings(segment_records, embeddings, model_id):
         # syntax we need when separators remove whitespace.
         vector_str = json.dumps(emb_record["embedding"], separators=(",", ":"))
         parameter_sets.append([
-            {"name": "eid",      "value": {"stringValue": embedding_id}},
-            {"name": "sid",      "value": {"stringValue": segment_id}},
-            {"name": "vec",      "value": {"stringValue": vector_str}},
-            {"name": "model_id", "value": {"stringValue": model_id}},
+            {"name": "eid",               "value": {"stringValue": embedding_id}},
+            {"name": "sid",               "value": {"stringValue": segment_id}},
+            {"name": "vec",               "value": {"stringValue": vector_str}},
+            {"name": "model_id",          "value": {"stringValue": model_id}},
+            {"name": "is_frame_embedding", "value": {"booleanValue": False}},
         ])
 
     if parameter_sets:
         _batch_execute(
             """
-            INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id)
-            VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id)
+            INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id, is_frame_embedding)
+            VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id, :is_frame_embedding)
             ON CONFLICT DO NOTHING
             """,
             parameter_sets,
@@ -163,17 +164,18 @@ def insert_frame_embeddings(segment_records, frame_emb_data, model_id):
         embedding_id = str(uuid.uuid4())
         vector_str = json.dumps(entry["embedding"], separators=(",", ":"))
         parameter_sets.append([
-            {"name": "eid",      "value": {"stringValue": embedding_id}},
-            {"name": "sid",      "value": {"stringValue": segment_id}},
-            {"name": "vec",      "value": {"stringValue": vector_str}},
-            {"name": "model_id", "value": {"stringValue": model_id}},
+            {"name": "eid",               "value": {"stringValue": embedding_id}},
+            {"name": "sid",               "value": {"stringValue": segment_id}},
+            {"name": "vec",               "value": {"stringValue": vector_str}},
+            {"name": "model_id",          "value": {"stringValue": model_id}},
+            {"name": "is_frame_embedding", "value": {"booleanValue": True}},
         ])
 
     if parameter_sets:
         _batch_execute(
             """
-            INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id)
-            VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id)
+            INSERT INTO segment_embeddings (embedding_id, segment_id, embedding, model_id, is_frame_embedding)
+            VALUES (:eid::uuid, :sid::uuid, :vec::vector, :model_id, :is_frame_embedding)
             ON CONFLICT DO NOTHING
             """,
             parameter_sets,
