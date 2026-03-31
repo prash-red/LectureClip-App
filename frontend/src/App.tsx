@@ -5,6 +5,7 @@ import { registerUser } from '@/lib/api.ts'
 import { AuthPage } from '@/pages/AuthPage.tsx'
 import { DashboardPage } from '@/pages/DashboardPage.tsx'
 import { PlayerPage } from '@/pages/PlayerPage.tsx'
+import { ProcessingPage } from '@/pages/ProcessingPage.tsx'
 import { QueryPage } from '@/pages/QueryPage.tsx'
 import { UploadPage } from '@/pages/UploadPage.tsx'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar.tsx'
@@ -15,6 +16,7 @@ import type { Segment, Video } from '@/lib/types.ts'
 type AppView =
   | { kind: 'dashboard' }
   | { kind: 'upload' }
+  | { kind: 'processing'; videoId: string; file: File }
   | { kind: 'query'; videoId: string; file: File | null; videoUrl?: string }
   | { kind: 'player'; videoId: string; file: File | null; videoUrl?: string; segments: Segment[] }
 
@@ -27,7 +29,7 @@ function MainApp({ session, onSignOut }: MainAppProps) {
   const [view, setView] = useState<AppView>({ kind: 'dashboard' })
 
   function handleUploadComplete(videoId: string, file: File) {
-    setView({ kind: 'query', videoId, file })
+    setView({ kind: 'processing', videoId, file })
   }
 
   function handleQueryComplete(videoId: string, file: File | null, videoUrl: string | undefined, segments: Segment[]) {
@@ -76,6 +78,16 @@ function MainApp({ session, onSignOut }: MainAppProps) {
             userId={session.email}
             onUploadComplete={handleUploadComplete}
             onBack={() => setView({ kind: 'dashboard' })}
+          />
+        )}
+        {view.kind === 'processing' && (
+          <ProcessingPage
+            videoId={view.videoId}
+            userId={session.email}
+            onProcessingComplete={(video) =>
+              setView({ kind: 'query', videoId: video.videoId, file: view.file, videoUrl: video.playbackUrl ?? undefined })
+            }
+            onCancel={() => setView({ kind: 'dashboard' })}
           />
         )}
         {view.kind === 'query' && (

@@ -1,6 +1,10 @@
 export type Segment = {
+  segmentId: string
   start: number
   end: number
+  idx: number
+  text: string
+  similarity: number
 }
 
 export type TranscriptSegment = {

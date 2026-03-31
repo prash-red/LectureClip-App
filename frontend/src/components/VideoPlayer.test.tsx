@@ -6,8 +6,8 @@ import { VideoPlayer } from '@/components/VideoPlayer.tsx'
 import type { VideoPlayerHandle } from '@/components/VideoPlayer.tsx'
 
 const segments = [
-  { start: 5, end: 10 },
-  { start: 20, end: 30 },
+  { segmentId: 'seg-1', start: 5, end: 10, idx: 0, text: 'First segment', similarity: 0.9 },
+  { segmentId: 'seg-2', start: 20, end: 30, idx: 1, text: 'Second segment', similarity: 0.8 },
 ]
 
 describe('VideoPlayer', () => {
@@ -33,7 +33,7 @@ describe('VideoPlayer', () => {
 
     expect(onPlaybackTimeUpdate).toHaveBeenCalledWith(7)
     expect(
-      screen.getByText('Current position is outside the highlighted segments.'),
+      screen.getByText('Outside highlighted segments'),
     ).toBeInTheDocument()
   })
 
@@ -134,7 +134,7 @@ describe('VideoPlayer', () => {
 
     expect(onPlaybackTimeUpdate).toHaveBeenCalledWith(40)
     expect(
-      screen.getByText('Current position is outside the highlighted segments.'),
+      screen.getByText('Outside highlighted segments'),
     ).toBeInTheDocument()
   })
 
@@ -166,6 +166,19 @@ describe('VideoPlayer', () => {
     expect(screen.getByText('Segment 2 of 2')).toBeInTheDocument()
   })
 
+  it('seekTo repositions the video and starts free playback', () => {
+    const ref = createRef<VideoPlayerHandle>()
+    render(<VideoPlayer ref={ref} src="blob:mock-video" segments={segments} />)
+
+    const video = document.querySelector('video') as HTMLVideoElement
+    fireEvent.loadedMetadata(video)
+
+    ref.current?.seekTo(25)
+
+    expect(video.currentTime).toBe(25)
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
+  })
+
   it('does not change the highlighted segment when free playback stays in the same range', () => {
     render(<VideoPlayer src="blob:mock-video" segments={segments} />)
 
@@ -183,7 +196,7 @@ describe('VideoPlayer', () => {
     fireEvent.timeUpdate(video)
 
     expect(
-      screen.getByText('Current position is outside the highlighted segments.'),
+      screen.getByText('Outside highlighted segments'),
     ).toBeInTheDocument()
   })
 })

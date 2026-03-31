@@ -12,8 +12,8 @@ describe('QueryPage', () => {
   it('trims the query before searching and returns the new segments', async () => {
     const user = userEvent.setup()
     const onQueryComplete = vi.fn()
-    const nextSegments = [{ start: 12, end: 28 }]
-    let resolveSearch: ((value: { segments: { start: number; end: number }[] }) => void) | undefined
+    const nextSegments = [{ segmentId: 'seg-1', start: 12, end: 28, idx: 0, text: 'Neural networks', similarity: 0.9 }]
+    let resolveSearch: ((value: { segments: typeof nextSegments }) => void) | undefined
 
     vi.mocked(queryVideo).mockImplementation(
       () =>

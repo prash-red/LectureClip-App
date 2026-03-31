@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { VideoPlayer } from '@/components/VideoPlayer.tsx'
 import type { VideoPlayerHandle } from '@/components/VideoPlayer.tsx'
-import { chatVideo, getTranscript, queryVideo } from '@/lib/api.ts'
+import { chatVideo, queryVideo } from '@/lib/api.ts'
 import type { ChatMessage, ChatSegment, Segment, TranscriptSegment } from '@/lib/types.ts'
 import { Button } from '@/components/ui/button.tsx'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card.tsx'
@@ -49,7 +49,6 @@ export function PlayerPage({
   const [query, setQuery] = useState('')
   const [isSearching, setIsSearching] = useState(false)
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([])
-  const [isTranscriptLoading, setIsTranscriptLoading] = useState(true)
   const [currentTime, setCurrentTime] = useState(0)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -70,13 +69,8 @@ export function PlayerPage({
   }, [file, videoUrl, videoId])
 
   useEffect(() => {
-    let cancelled = false
-    setIsTranscriptLoading(true)
-    getTranscript(videoId)
-      .then(({ transcript: t }) => { if (!cancelled) setTranscript(t) })
-      .finally(() => { if (!cancelled) setIsTranscriptLoading(false) })
-    return () => { cancelled = true }
-  }, [videoId])
+    setTranscript(segments.map((s) => ({ start: s.start, end: s.end, text: s.text })))
+  }, [segments])
 
   const activeTranscriptIndex = getTranscriptIndexForTime(transcript, currentTime)
 
@@ -280,10 +274,7 @@ export function PlayerPage({
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[520px] px-4 pb-4">
-              {isTranscriptLoading && (
-                <p className="text-sm text-muted-foreground py-4 text-center">Loading transcript…</p>
-              )}
-              {!isTranscriptLoading && transcript.length === 0 && (
+              {transcript.length === 0 && (
                 <p className="text-sm text-muted-foreground py-4 text-center">No transcript available yet.</p>
               )}
               <div className="space-y-2">

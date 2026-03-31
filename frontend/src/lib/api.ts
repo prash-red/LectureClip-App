@@ -192,7 +192,7 @@ export async function queryVideo(
   videoId: string,
   query: string,
 ): Promise<{ segments: Segment[] }> {
-  const res = await fetch(`${API_BASE}/query`, {
+  const res = await fetch(`${API_BASE}/query-info`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ videoId, query, k: 5 }),
