@@ -49,6 +49,9 @@ def handler(event, context):
     video_id       = body.get("videoId")
     query          = body.get("query")
     include_frames = bool(body.get("includeFrames", True))
+    only_frames = bool(body.get("onlyFrames", False))
+    text_weight  = float(body.get("textWeight",  0.5))
+    frame_weight = float(body.get("frameWeight", 0.5))
 
     raw_k = body.get("k", 5)
     try:
@@ -70,7 +73,7 @@ def handler(event, context):
 
     model_id = Model(EMBEDDING_MODEL_ID)
     vector   = embed_text(query, model_id, EMBEDDING_DIM)
-    segments = search_segments(video_uri, vector, k, include_frames)
+    segments = search_segments(video_uri, vector, k, include_frames, only_frames, text_weight, frame_weight)
 
     print(f"Returning {len(segments)} segments for {video_uri!r}")
     return _resp(200, {"segments": segments})

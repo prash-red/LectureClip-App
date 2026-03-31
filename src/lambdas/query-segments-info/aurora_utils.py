@@ -66,32 +66,45 @@ rds_data = boto3.client("rds-data")
 # LIMIT  :k
 # """
 
-# TODO revert this back after testing
-# The test currently fail because of this
-# removes duplication filtering for testing
+# Computes a weighted average of text and frame cosine similarities per segment.
+# Each modality is joined separately so both scores are available simultaneously.
+# Segments missing one modality get 0 for that modality's contribution.
+# Segments with no embeddings at all are excluded by the HAVING clause.
 _SEARCH_SQL_ALL = """
-SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity
-FROM (
-    SELECT s.segment_id,
-           s.start_s,
-           s.end_s,
-           s.idx,
-           s.text,
-            se.is_frame_embedding,
-           1 - (se.embedding <=> :vec::vector) AS similarity
-    FROM   segment_embeddings se
-    JOIN   segments s ON se.segment_id = s.segment_id
-    JOIN   lectures l ON s.lecture_id  = l.lecture_id
-    WHERE  l.video_uri = :video_uri
-    ORDER  BY similarity DESC
-) ranked
+SELECT
+    s.segment_id,
+    s.start_s,
+    s.end_s,
+    s.idx,
+    s.text,
+    :text_weight * COALESCE(te.similarity, 0) + :frame_weight * COALESCE(fe.similarity, 0) AS similarity
+FROM   segments s
+JOIN   lectures l ON s.lecture_id = l.lecture_id
+LEFT JOIN (
+    SELECT DISTINCT ON (segment_id)
+           segment_id, 1 - (embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings
+    WHERE  is_frame_embedding = FALSE
+    ORDER  BY segment_id, similarity DESC
+) te ON s.segment_id = te.segment_id
+LEFT JOIN (
+    SELECT DISTINCT ON (segment_id)
+           segment_id, 1 - (embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings
+    WHERE  is_frame_embedding = TRUE
+    ORDER  BY segment_id, similarity DESC
+) fe ON s.segment_id = fe.segment_id
+WHERE  l.video_uri = :video_uri
+  AND  (te.similarity IS NOT NULL OR fe.similarity IS NOT NULL)
+ORDER  BY similarity DESC
 LIMIT  :k
 """
 
 _SEARCH_SQL_TEXT_ONLY = """
 SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity
 FROM (
-    SELECT s.segment_id,
+    SELECT DISTINCT ON (se.segment_id) 
+    s.segment_id,
            s.start_s,
            s.end_s,
            s.idx,
@@ -108,8 +121,28 @@ FROM (
 LIMIT  :k
 """
 
+_SEARCH_SQL_FRAMES_ONLY = """
+SELECT segment_id, start_s, end_s, idx, text, is_frame_embedding, similarity
+FROM (
+    SELECT DISTINCT ON (se.segment_id) 
+    s.segment_id,
+           s.start_s,
+           s.end_s,
+           s.idx,
+           s.text,
+        se.is_frame_embedding,
+           1 - (se.embedding <=> :vec::vector) AS similarity
+    FROM   segment_embeddings se
+    JOIN   segments s ON se.segment_id = s.segment_id
+    JOIN   lectures l ON s.lecture_id  = l.lecture_id
+    WHERE  l.video_uri = :video_uri
+      AND  se.is_frame_embedding = TRUE
+    ORDER  BY similarity DESC
+) ranked
+LIMIT  :k
+"""
 
-def search_segments(video_uri: str, embedding: list, k: int, include_frames: bool = True) -> list:
+def search_segments(video_uri: str, embedding: list, k: int, include_frames: bool = True, only_frames: bool = False, text_weight: float = 0.5, frame_weight: float = 0.5) -> list:
     """
     Return the top-k most similar segments for a video uri.
 
@@ -135,8 +168,25 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
     """
     print('##########include frames is ' + str(include_frames))
 
-    sql = _SEARCH_SQL_ALL if include_frames else _SEARCH_SQL_TEXT_ONLY
+    if only_frames:
+        sql = _SEARCH_SQL_FRAMES_ONLY
+    elif include_frames:
+        sql = _SEARCH_SQL_ALL
+    else:
+        sql = _SEARCH_SQL_TEXT_ONLY
+
     vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+
+    params = [
+        {"name": "vec",       "value": {"stringValue": vec_str}},
+        {"name": "video_uri", "value": {"stringValue": video_uri}},
+        {"name": "k",         "value": {"longValue": k}},
+    ]
+    if sql is _SEARCH_SQL_ALL:
+        params += [
+            {"name": "text_weight",  "value": {"doubleValue": text_weight}},
+            {"name": "frame_weight", "value": {"doubleValue": frame_weight}},
+        ]
 
     resp = rds_data.execute_statement(
         resourceArn=CLUSTER_ARN,
@@ -144,11 +194,7 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
         database=DB_NAME,
         sql=sql,
         includeResultMetadata=True,
-        parameters=[
-            {"name": "vec",       "value": {"stringValue": vec_str}},
-            {"name": "video_uri", "value": {"stringValue": video_uri}},
-            {"name": "k",         "value": {"longValue": k}},
-        ],
+        parameters=params,
     )
 
     cols = [c["label"] for c in resp.get("columnMetadata", [])]
@@ -156,15 +202,18 @@ def search_segments(video_uri: str, embedding: list, k: int, include_frames: boo
         dict(zip(cols, [list(field.values())[0] for field in row]))
         for row in resp.get("records", [])
     ]
-    return [
-        {
+
+    results = []
+    for r in rows:
+        entry = {
             "segmentId":  r["segment_id"],
             "start":      float(r["start_s"]),
             "end":        float(r["end_s"]),
             "idx":        int(r["idx"]),
             "text":       r["text"],
-            "isFrameEmbedding": r["is_frame_embedding"],
             "similarity": float(r["similarity"]),
         }
-        for r in rows
-    ]
+        if "is_frame_embedding" in r:
+            entry["isFrameEmbedding"] = r["is_frame_embedding"]
+        results.append(entry)
+    return results
